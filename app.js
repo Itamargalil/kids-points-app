@@ -123,8 +123,8 @@ async function sha256(text) {
 }
 
 const seedProfiles = [
-  { id: "child9", name: "סופיה", age: 9, avatar: "🦊", morningTarget: "08:00", bedtimeTarget: "20:30", uiMode: "standard" },
-  { id: "child4", name: "אנה", age: 4, avatar: "🐼", morningTarget: "08:00", bedtimeTarget: "19:45", uiMode: "visual" }
+  { id: "child9", name: "סופיה", age: 9, avatar: "🦘", morningTarget: "08:00", bedtimeTarget: "20:30", uiMode: "standard" },
+  { id: "child4", name: "אנה", age: 4, avatar: "🐱", morningTarget: "08:00", bedtimeTarget: "19:45", uiMode: "visual" }
 ];
 
 const seedTasks = [
@@ -205,8 +205,8 @@ async function seedIfNeeded() {
 async function enforceProfileNames() {
   const p9 = await getById("profiles", "child9");
   const p4 = await getById("profiles", "child4");
-  if (p9 && p9.name !== "סופיה") await put("profiles", { ...p9, name: "סופיה" });
-  if (p4 && p4.name !== "אנה") await put("profiles", { ...p4, name: "אנה" });
+  if (p9 && (p9.name !== "סופיה" || p9.avatar !== "🦘")) await put("profiles", { ...p9, name: "סופיה", avatar: "🦘" });
+  if (p4 && (p4.name !== "אנה" || p4.avatar !== "🐱")) await put("profiles", { ...p4, name: "אנה", avatar: "🐱" });
 }
 
 function formatHM(date) {
