@@ -15,6 +15,18 @@ const nowHM = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+function hebrewWeekdayLabel(date = new Date()) {
+  const days = ["יום ראשון", "יום שני", "יום שלישי", "יום רביעי", "יום חמישי", "יום שישי", "יום שבת"];
+  return days[date.getDay()];
+}
+
+function greetingByTime(date = new Date()) {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) return "בוקר טוב";
+  if (hour >= 12 && hour < 17) return "צהריים טובים";
+  return "ערב טוב";
+}
+
 const dateKey = todayISO();
 const DB_NAME = "KidsPointsApp";
 const DB_VERSION = 1;
@@ -473,7 +485,11 @@ async function renderProfiles() {
   app.innerHTML = `
     <section class="screen">
       <div class="row">
-        <h1>מי משתמשת עכשיו?</h1>
+        <div>
+          <h1>${greetingByTime()}</h1>
+          <p class="muted">${hebrewWeekdayLabel()}</p>
+          <p>מי משתמשת עכשיו?</p>
+        </div>
         <button class="big-btn ghost" id="openAdminFromProfiles">אזור הורה</button>
       </div>
       <div class="profile-grid">
@@ -516,7 +532,9 @@ async function renderHome() {
     <section class="screen">
       <div class="row card">
         <div>
-          <h1>${profile.avatar} ${profile.name} - היום שלי</h1>
+          <h1>${greetingByTime()} ${profile.name} ${profile.avatar}</h1>
+          <p class="muted">${hebrewWeekdayLabel()}</p>
+          <p class="muted">היום שלי</p>
           <p class="muted">יעד בוקר: ${profile.morningTarget}</p>
         </div>
         <button class="big-btn ghost" id="switchProfile">החלפת פרופיל</button>
