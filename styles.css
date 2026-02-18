@@ -1,13 +1,13 @@
 :root {
-  --bg: linear-gradient(180deg, #fff5e8 0%, #ffe8d8 45%, #ffe1ee 100%);
-  --card: #ffffff;
-  --accent: #ff8b6b;
-  --accent-2: #39c7b5;
-  --ink: #25324a;
+  --bg: linear-gradient(180deg, #fff8ff 0%, #f6eeff 24%, #eaf6ff 48%, #fff8e9 70%, #ffeef6 100%);
+  --card: #ffffffcc;
+  --accent: #ff69b4;
+  --accent-2: #6ac6ff;
+  --ink: #3a2c5a;
   --ok: #17a468;
-  --warn: #ea7f32;
+  --warn: #f59f40;
   --bad: #d24545;
-  --muted: #667085;
+  --muted: #6a6383;
 }
 
 * {
@@ -20,6 +20,36 @@ body {
   background: var(--bg);
   color: var(--ink);
   min-height: 100dvh;
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: -1;
+}
+
+body::before {
+  inset: 0;
+  background:
+    radial-gradient(circle at 12% 12%, #ffffffcc 0 36px, transparent 38px),
+    radial-gradient(circle at 20% 12%, #ffffffcc 0 26px, transparent 28px),
+    radial-gradient(circle at 82% 18%, #ffffffcc 0 42px, transparent 44px),
+    radial-gradient(circle at 74% 18%, #ffffffcc 0 28px, transparent 30px);
+}
+
+body::after {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 780px);
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff8fd3 0%, #ffca73 20%, #9ae084 40%, #7ddcff 60%, #bca9ff 80%, #ff8fd3 100%);
+  opacity: 0.8;
 }
 
 main {
@@ -44,7 +74,8 @@ p {
   background: var(--card);
   border-radius: 18px;
   padding: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  border: 1px solid #ffffff;
+  box-shadow: 0 10px 30px rgba(121, 104, 177, 0.18);
 }
 
 .row {
@@ -69,16 +100,17 @@ select {
 
 .big-btn {
   border: 0;
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 14px 16px;
-  background: var(--accent);
+  background: linear-gradient(135deg, #ff77c3, #ff5ca9);
   color: #fff;
   font-weight: 700;
   min-height: 54px;
+  box-shadow: 0 8px 18px rgba(255, 96, 180, 0.3);
 }
 
 .big-btn.secondary {
-  background: var(--accent-2);
+  background: linear-gradient(135deg, #62c8ff, #59e3c1);
 }
 
 .big-btn.ghost {
@@ -103,21 +135,31 @@ select {
 
 .profile-tile {
   border: 0;
-  border-radius: 20px;
-  background: #fff;
+  border-radius: 26px;
+  background: linear-gradient(180deg, #ffffff, #fff7fd);
   padding: 16px;
   min-height: 180px;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.11);
+  box-shadow: 0 12px 26px rgba(160, 120, 200, 0.2);
   text-align: center;
 }
 
 .avatar {
-  font-size: 3rem;
+  font-size: 3.4rem;
   margin-bottom: 8px;
+}
+
+.profile-tile .avatar::after {
+  content: " ✨";
 }
 
 .muted {
   color: var(--muted);
+}
+
+.weekday-label {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #5b3fa8;
 }
 
 .points {
@@ -135,7 +177,7 @@ select {
   width: 130px;
   height: 130px;
   border-radius: 50%;
-  background: conic-gradient(var(--accent) calc(var(--p) * 1%), #ecedf2 0);
+  background: conic-gradient(#ff7fc8 calc(var(--p) * 1%), #ebecf7 0);
   position: relative;
 }
 
@@ -156,9 +198,10 @@ select {
   grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: center;
-  border: 2px solid #edf0f6;
-  border-radius: 14px;
+  border: 2px solid #f1e9ff;
+  border-radius: 16px;
   padding: 10px;
+  background: #ffffffbf;
 }
 
 .task-item.done {
@@ -214,13 +257,13 @@ select {
 
 .bottom-nav button {
   border: 0;
-  border-radius: 10px;
-  background: #f2f4f9;
+  border-radius: 12px;
+  background: #f7f2ff;
   min-height: 46px;
 }
 
 .bottom-nav button.active {
-  background: var(--accent);
+  background: linear-gradient(135deg, #ff77c3, #7e88ff);
   color: #fff;
   font-weight: 700;
 }

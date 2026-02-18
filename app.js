@@ -486,8 +486,8 @@ async function renderProfiles() {
     <section class="screen">
       <div class="row">
         <div>
-          <h1>${greetingByTime()}</h1>
-          <p class="muted">${hebrewWeekdayLabel()}</p>
+          <h1>🦄 ${greetingByTime()}</h1>
+          <p class="weekday-label">${hebrewWeekdayLabel()}</p>
           <p>מי משתמשת עכשיו?</p>
         </div>
         <button class="big-btn ghost" id="openAdminFromProfiles">אזור הורה</button>
@@ -532,8 +532,8 @@ async function renderHome() {
     <section class="screen">
       <div class="row card">
         <div>
-          <h1>${greetingByTime()} ${profile.name} ${profile.avatar}</h1>
-          <p class="muted">${hebrewWeekdayLabel()}</p>
+          <h1>☁️ ${greetingByTime()} ${profile.name} ${profile.avatar}</h1>
+          <p class="weekday-label">${hebrewWeekdayLabel()}</p>
           <p class="muted">היום שלי</p>
           <p class="muted">יעד בוקר: ${profile.morningTarget}</p>
         </div>
