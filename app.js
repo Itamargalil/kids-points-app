@@ -170,6 +170,8 @@ const seedRewards = [
   { id: "r3", title: "בחירת פעילות שבת", cost: 120, requiresApproval: true, active: true }
 ];
 
+const RANDOM_APPROVAL_TASK_BLOCKLIST = new Set(["לקום"]);
+
 const defaultScoring = {
   child9: { routineBonusOnTime: 20, streakBonusPerDay: 2, streakCap: 12, lateThresholdMin: 20, latePenaltyMode: "partial", partialPenaltyPercent: 50 },
   child4: { routineBonusOnTime: 15, streakBonusPerDay: 1, streakCap: 8, lateThresholdMin: 25, latePenaltyMode: "none", partialPenaltyPercent: 0 }
@@ -203,8 +205,28 @@ async function seedIfNeeded() {
     await put("rewards", reward);
   }
 
-  await put("settings", { id: "global", randomApprovalRate: 20, parentPinHash: await sha256("1234") });
+  await put("settings", { id: "global", randomApprovalRate: 0, parentPinHash: await sha256("1234") });
   await put("settings", { id: "scoring", value: defaultScoring });
+}
+
+async function ensureGlobalSettings() {
+  const existing = await getById("settings", "global");
+  const fallbackHash = await sha256("1234");
+  const next = {
+    id: "global",
+    randomApprovalRate: Number(existing?.randomApprovalRate ?? 0),
+    parentPinHash: existing?.parentPinHash || fallbackHash
+  };
+  await put("settings", next);
+}
+
+async function enforceTaskApprovalDefaults() {
+  const tasks = await getAll("tasks");
+  for (const task of tasks) {
+    if (RANDOM_APPROVAL_TASK_BLOCKLIST.has(task.title) && task.allowRandomApproval) {
+      await put("tasks", { ...task, allowRandomApproval: false });
+    }
+  }
 }
 
 async function enforceProfileNames() {
@@ -378,6 +400,7 @@ async function getScoreSummary(profileId, scoreDate = todayISO()) {
 
 async function shouldRequireApproval(task) {
   if (task.requiresParentApproval) return true;
+  if (RANDOM_APPROVAL_TASK_BLOCKLIST.has(task.title)) return false;
   if (!task.allowRandomApproval) return false;
   const settings = await getById("settings", "global");
   const rate = settings?.randomApprovalRate || 0;
@@ -1133,8 +1156,16 @@ async function openParentGate(afterAuthAction = null) {
   pinDialog.showModal();
 }
 
+pinDialog.addEventListener("close", () => {
+  // Prevent stale callbacks from blocking later admin login attempts.
+  if (!state.parentAuthorized) {
+    state.afterParentAuthAction = null;
+  }
+});
+
 pinForm.addEventListener("submit", async (e) => {
   e.preventDefault();
+  await ensureGlobalSettings();
   const global = await getById("settings", "global");
   const entered = await sha256(pinInput.value.trim());
   if (entered !== global.parentPinHash) {
@@ -1450,7 +1481,9 @@ async function render() {
 async function bootstrap() {
   state.db = await openDB();
   await seedIfNeeded();
+  await ensureGlobalSettings();
   await enforceProfileNames();
+  await enforceTaskApprovalDefaults();
   const profiles = await getAll("profiles");
   for (const profile of profiles) {
     await ensureInstances(profile.id, dateKey);
@@ -1459,7 +1492,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=7");
+    navigator.serviceWorker.register("sw.js?v=8");
   }
 }
 
