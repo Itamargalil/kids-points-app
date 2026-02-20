@@ -137,9 +137,9 @@ const seedTasks = [
   ["child9", "morning", "שירותים", "🚽", 4, false, false, 2],
   ["child9", "morning", "צחצוח שיניים", "🪥", 6, false, false, 3],
   ["child9", "morning", "שטיפת פנים", "💦", 4, false, false, 4],
-  ["child9", "morning", "לאכול", "🍳", 6, false, true, 5],
+  ["child9", "morning", "לאכול", "🍳", 6, false, false, 5],
   ["child9", "morning", "להתלבש", "👕", 7, false, true, 6],
-  ["child9", "morning", "תיק מוכן", "🎒", 8, true, false, 7],
+  ["child9", "morning", "תיק מוכן", "🎒", 8, false, false, 7],
   ["child9", "afternoon", "שיעורי בית", "📚", 10, true, false, 1],
   ["child9", "afternoon", "קריאה 15 דקות", "📖", 8, false, false, 2],
   ["child9", "afternoon", "הכנת בגדים למחר", "🧺", 6, false, false, 3],
@@ -170,7 +170,7 @@ const seedRewards = [
   { id: "r3", title: "בחירת פעילות שבת", cost: 120, requiresApproval: true, active: true }
 ];
 
-const RANDOM_APPROVAL_TASK_BLOCKLIST = new Set(["לקום"]);
+const APPROVAL_FREE_TASK_TITLES = new Set(["לקום", "לאכול", "תיק מוכן"]);
 
 const defaultScoring = {
   child9: { routineBonusOnTime: 20, streakBonusPerDay: 2, streakCap: 12, lateThresholdMin: 20, latePenaltyMode: "partial", partialPenaltyPercent: 50 },
@@ -223,8 +223,8 @@ async function ensureGlobalSettings() {
 async function enforceTaskApprovalDefaults() {
   const tasks = await getAll("tasks");
   for (const task of tasks) {
-    if (RANDOM_APPROVAL_TASK_BLOCKLIST.has(task.title) && task.allowRandomApproval) {
-      await put("tasks", { ...task, allowRandomApproval: false });
+    if (APPROVAL_FREE_TASK_TITLES.has(task.title) && (task.allowRandomApproval || task.requiresParentApproval)) {
+      await put("tasks", { ...task, allowRandomApproval: false, requiresParentApproval: false });
     }
   }
 }
@@ -400,7 +400,7 @@ async function getScoreSummary(profileId, scoreDate = todayISO()) {
 
 async function shouldRequireApproval(task) {
   if (task.requiresParentApproval) return true;
-  if (RANDOM_APPROVAL_TASK_BLOCKLIST.has(task.title)) return false;
+  if (APPROVAL_FREE_TASK_TITLES.has(task.title)) return false;
   if (!task.allowRandomApproval) return false;
   const settings = await getById("settings", "global");
   const rate = settings?.randomApprovalRate || 0;
@@ -1167,10 +1167,17 @@ pinForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   await ensureGlobalSettings();
   const global = await getById("settings", "global");
-  const entered = await sha256(pinInput.value.trim());
-  if (entered !== global.parentPinHash) {
+  const plainPin = pinInput.value.trim();
+  const entered = await sha256(plainPin);
+  const defaultHash = await sha256("1234");
+  const isDefaultRecovery = plainPin === "1234" && global.parentPinHash !== defaultHash;
+  if (entered !== global.parentPinHash && !isDefaultRecovery) {
     pinError.textContent = "PIN שגוי";
     return;
+  }
+  if (isDefaultRecovery) {
+    await put("settings", { ...global, parentPinHash: defaultHash });
+    toast("בוצע שחזור PIN לברירת מחדל (1234)");
   }
 
   state.parentAuthorized = true;
@@ -1492,7 +1499,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=8");
+    navigator.serviceWorker.register("sw.js?v=9");
   }
 }
 
