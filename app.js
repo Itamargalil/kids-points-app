@@ -34,6 +34,8 @@ const DAILY_MAX_POINTS = 100;
 const TASKS_POINTS_BUDGET = 80;
 const MORNING_BONUS_POINTS = 10;
 const STREAK_BONUS_MAX = 10;
+const LEARN_POINTS_PER_CORRECT = 2;
+const LEARN_DAILY_CAP = 30;
 
 const stores = [
   "profiles",
@@ -463,8 +465,11 @@ async function recomputeWallet(profileId) {
   });
 }
 
-async function getDailyEarnedPoints(profileId, scoreDate) {
-  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId && t.kind === "earn" && scoreDateOf(t) === scoreDate);
+async function getDailyEarnedPoints(profileId, scoreDate, sources = null) {
+  const allowed = sources ? new Set(sources) : null;
+  const transactions = (await getAll("transactions")).filter(
+    (t) => t.profileId === profileId && t.kind === "earn" && scoreDateOf(t) === scoreDate && (!allowed || allowed.has(t.source))
+  );
   return transactions.reduce((sum, t) => sum + Number(t.pointsDelta || 0), 0);
 }
 
@@ -472,9 +477,15 @@ async function addTransaction(profileId, kind, pointsDelta, source, note = "", o
   const scoreDate = options.scoreDate || todayISO();
   let safeDelta = Number(pointsDelta);
   if (kind === "earn") {
-    const alreadyEarned = await getDailyEarnedPoints(profileId, scoreDate);
-    const leftToday = Math.max(0, DAILY_MAX_POINTS - alreadyEarned);
-    safeDelta = Math.min(Math.max(0, safeDelta), leftToday);
+    if (source === "learn") {
+      const alreadyLearned = await getDailyEarnedPoints(profileId, scoreDate, ["learn"]);
+      const leftLearn = Math.max(0, LEARN_DAILY_CAP - alreadyLearned);
+      safeDelta = Math.min(Math.max(0, safeDelta), leftLearn);
+    } else {
+      const alreadyEarned = await getDailyEarnedPoints(profileId, scoreDate, ["task", "routine_bonus", "streak"]);
+      const leftToday = Math.max(0, DAILY_MAX_POINTS - alreadyEarned);
+      safeDelta = Math.min(Math.max(0, safeDelta), leftToday);
+    }
   }
   if (!Number.isFinite(safeDelta) || safeDelta === 0) return 0;
 
@@ -507,7 +518,9 @@ async function removeEarnTransactionsForDate(profileId, scoreDate) {
 }
 
 async function getScoreSummary(profileId, scoreDate = todayISO()) {
-  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId && t.kind === "earn");
+  const transactions = (await getAll("transactions")).filter(
+    (t) => t.profileId === profileId && t.kind === "earn" && ["task", "routine_bonus", "streak"].includes(t.source)
+  );
   const byDate = new Map();
   for (const t of transactions) {
     const d = scoreDateOf(t);
@@ -537,6 +550,39 @@ async function getScoreSummary(profileId, scoreDate = todayISO()) {
     weeklyCap: DAILY_MAX_POINTS * 7,
     monthly,
     monthlyCap: DAILY_MAX_POINTS * daysInMonth
+  };
+}
+
+async function getLearnSummary(profileId, scoreDate = todayISO()) {
+  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId && t.kind === "earn" && t.source === "learn");
+  const byDate = new Map();
+  for (const t of transactions) {
+    const d = scoreDateOf(t);
+    byDate.set(d, (byDate.get(d) || 0) + Number(t.pointsDelta || 0));
+  }
+  const daily = Math.min(LEARN_DAILY_CAP, byDate.get(scoreDate) || 0);
+
+  const weekStart = weekStartISO(scoreDate);
+  const weekEnd = weekEndISO(scoreDate);
+  const weekly = [...byDate.entries()]
+    .filter(([d]) => d >= weekStart && d <= weekEnd)
+    .reduce((sum, [, value]) => sum + Math.min(LEARN_DAILY_CAP, value), 0);
+
+  const monthPrefix = scoreDate.slice(0, 7);
+  const monthly = [...byDate.entries()]
+    .filter(([d]) => d.startsWith(monthPrefix))
+    .reduce((sum, [, value]) => sum + Math.min(LEARN_DAILY_CAP, value), 0);
+
+  const monthDate = parseISODate(scoreDate);
+  const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+
+  return {
+    daily,
+    dailyCap: LEARN_DAILY_CAP,
+    weekly,
+    weeklyCap: LEARN_DAILY_CAP * 7,
+    monthly,
+    monthlyCap: LEARN_DAILY_CAP * daysInMonth
   };
 }
 
@@ -983,6 +1029,7 @@ async function renderHome() {
   const instances = await getInstancesForDate(state.profileId, dateKey);
   const wallet = await getById("wallets", `wallet_${state.profileId}`);
   const summary = await getScoreSummary(state.profileId, dateKey);
+  const learnSummary = await getLearnSummary(state.profileId, dateKey);
   const done = instances.filter((i) => i.status === "approved").length;
   const percent = Math.round((summary.daily / summary.dailyCap) * 100);
   const remaining = instances.filter((i) => i.status !== "approved");
@@ -1009,6 +1056,7 @@ async function renderHome() {
           <p class="points">${summary.daily}/${summary.dailyCap}</p>
           <p class="muted">שבועי: ${summary.weekly}/${summary.weeklyCap}</p>
           <p class="muted">חודשי: ${summary.monthly}/${summary.monthlyCap}</p>
+          <p class="muted">לימודים היום: ${learnSummary.daily}/${learnSummary.dailyCap}</p>
           <p class="muted">יתרה בחנות תגמולים: ${wallet.balance}</p>
           <p class="muted">היום הושלמו ${done} מתוך ${instances.length}</p>
         </div>
@@ -1248,6 +1296,7 @@ async function renderLearnPlay() {
   const profile = await getProfile();
   const modules = profile.age >= 9 ? LEARN_MODULES_OLDER : LEARN_MODULES_YOUNGER;
   ensureLearnModuleState(modules);
+  const learnSummary = await getLearnSummary(state.profileId, dateKey);
 
   app.innerHTML = `
     <section class="screen">
@@ -1257,6 +1306,13 @@ async function renderLearnPlay() {
           <p class="muted">${profile.age >= 9 ? "תוכן מותאם גיל 10+" : "תוכן מותאם גיל 4-5"}</p>
         </div>
         <button class="big-btn ghost" id="learnToHome">היום שלי</button>
+      </div>
+
+      <div class="card">
+        <h3>ניקוד לימודים</h3>
+        <p class="points">${learnSummary.daily}/${learnSummary.dailyCap}</p>
+        <p class="muted">שבועי לימודים: ${learnSummary.weekly}/${learnSummary.weeklyCap}</p>
+        <p class="muted">חודשי לימודים: ${learnSummary.monthly}/${learnSummary.monthlyCap}</p>
       </div>
 
       <div class="learn-grid">
@@ -1304,8 +1360,20 @@ async function renderLearnPlay() {
       state.learnStats[moduleId].total += 1;
       if (isCorrect) {
         state.learnStats[moduleId].correct += 1;
+        const awarded = await addTransaction(
+          state.profileId,
+          "earn",
+          LEARN_POINTS_PER_CORRECT,
+          "learn",
+          `לימודים: ${module.title}`,
+          { scoreDate: dateKey }
+        );
         launchConfettiFromButton(btn);
-        toast("נכון! כל הכבוד!");
+        if (awarded > 0) {
+          toast(`נכון! +${awarded} נק' לימודים`);
+        } else {
+          toast("נכון! הגעת לתקרת ניקוד לימודים היומית");
+        }
       } else {
         toast(`כמעט! התשובה הנכונה: ${answer}`);
       }
@@ -1732,7 +1800,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=12");
+    navigator.serviceWorker.register("sw.js?v=13");
   }
 }
 
