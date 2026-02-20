@@ -833,7 +833,7 @@ async function renderProfiles() {
     });
   });
 
-  document.getElementById("openAdminFromProfiles").addEventListener("click", openParentGate);
+  document.getElementById("openAdminFromProfiles").addEventListener("click", () => openParentGate());
 }
 
 async function renderHome() {
@@ -1150,7 +1150,7 @@ async function renderRewards() {
 }
 
 async function openParentGate(afterAuthAction = null) {
-  state.afterParentAuthAction = afterAuthAction;
+  state.afterParentAuthAction = typeof afterAuthAction === "function" ? afterAuthAction : null;
   pinInput.value = "";
   pinError.textContent = "";
   pinDialog.showModal();
@@ -1182,12 +1182,17 @@ pinForm.addEventListener("submit", async (e) => {
 
   state.parentAuthorized = true;
   pinDialog.close();
-  if (state.afterParentAuthAction) {
+  if (typeof state.afterParentAuthAction === "function") {
     const action = state.afterParentAuthAction;
     state.afterParentAuthAction = null;
-    await action();
-    return;
+    try {
+      await action();
+      return;
+    } catch (error) {
+      console.error("Parent action failed after auth:", error);
+    }
   }
+  state.afterParentAuthAction = null;
   state.screen = "admin";
   render();
 });
@@ -1499,7 +1504,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=9");
+    navigator.serviceWorker.register("sw.js?v=10");
   }
 }
 

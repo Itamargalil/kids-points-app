@@ -1,4 +1,4 @@
-const CACHE = "kids-points-v9";
+const CACHE = "kids-points-v10";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json"];
 
 self.addEventListener("install", (event) => {
