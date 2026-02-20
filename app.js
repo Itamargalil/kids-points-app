@@ -1504,7 +1504,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=10");
+    navigator.serviceWorker.register("sw.js?v=11");
   }
 }
 
