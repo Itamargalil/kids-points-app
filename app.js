@@ -719,6 +719,25 @@ function showMedal(profileName) {
   setTimeout(() => medal.remove(), 2600);
 }
 
+function showRoutineCompletionModal(profileName, routineType) {
+  const overlay = document.createElement("div");
+  overlay.className = "routine-win-overlay";
+  overlay.innerHTML = `
+    <div class="routine-win-card">
+      <div class="routine-win-emoji">🌈✨</div>
+      <h2>כל הכבוד ${profileName}!</h2>
+      <p>סיימת בהצלחה את בלוק ${routineLabel(routineType)}</p>
+      <button class="big-btn secondary" id="routineWinHomeBtn">חזרה לתפריט הראשי</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#routineWinHomeBtn").addEventListener("click", () => {
+    overlay.remove();
+    state.screen = "home";
+    render();
+  });
+}
+
 async function isRoutineComplete(profileId, scoreDate, routineType) {
   const tasks = (await getAll("tasks")).filter((t) => t.profileId === profileId && t.routineType === routineType && t.active);
   if (tasks.length === 0) return false;
@@ -735,7 +754,8 @@ async function maybeCelebrateMilestones(profileId, scoreDate, routineType) {
     const routineMarker = await getById("meta", routineKey);
     if (!routineMarker) {
       await put("meta", { id: routineKey, value: true, createdAt: new Date().toISOString() });
-      launchFireworks();
+      const profile = await getById("profiles", profileId);
+      showRoutineCompletionModal(profile?.name || "אלופה", routineType);
     }
   }
 
@@ -1439,7 +1459,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=6");
+    navigator.serviceWorker.register("sw.js?v=7");
   }
 }
 

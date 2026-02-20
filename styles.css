@@ -402,6 +402,48 @@ label {
   margin-bottom: 8px;
 }
 
+.routine-win-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1490;
+  background: linear-gradient(180deg, #22123a66, #1d2a496e);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.routine-win-card {
+  width: min(92vw, 620px);
+  border-radius: 34px;
+  padding: 30px 22px;
+  text-align: center;
+  background: linear-gradient(135deg, #ffe8f7, #e8f4ff 45%, #fff8db);
+  border: 4px solid #ffffff;
+  box-shadow: 0 24px 44px rgba(39, 19, 70, 0.32);
+  animation: medal-enter 320ms ease-out;
+}
+
+.routine-win-emoji {
+  font-size: 2.6rem;
+  margin-bottom: 8px;
+}
+
+.routine-win-card h2 {
+  font-size: 2rem;
+  color: #4c2f8a;
+  margin-bottom: 8px;
+}
+
+.routine-win-card p {
+  font-size: 1.15rem;
+  color: #574b78;
+  margin-bottom: 18px;
+}
+
+button#routineWinHomeBtn {
+  min-width: min(82vw, 300px);
+}
+
 @keyframes confetti-pop {
   from {
     transform: translate(0, 0) scale(0.5) rotate(0deg);
