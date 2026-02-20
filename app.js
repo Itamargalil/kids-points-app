@@ -27,9 +27,13 @@ function greetingByTime(date = new Date()) {
   return "ערב טוב";
 }
 
-const dateKey = todayISO();
+let dateKey = todayISO();
 const DB_NAME = "KidsPointsApp";
 const DB_VERSION = 1;
+const DAILY_MAX_POINTS = 100;
+const TASKS_POINTS_BUDGET = 80;
+const MORNING_BONUS_POINTS = 10;
+const STREAK_BONUS_MAX = 10;
 
 const stores = [
   "profiles",
@@ -219,6 +223,32 @@ function minutesBetween(hmA, hmB) {
   return (h2 * 60 + m2) - (h1 * 60 + m1);
 }
 
+function isoFromDate(dateObj) {
+  const d = new Date(dateObj);
+  const tz = d.getTimezoneOffset() * 60000;
+  return new Date(d - tz).toISOString().slice(0, 10);
+}
+
+function scoreDateOf(transaction) {
+  return transaction.scoreDate || (transaction.createdAt ? transaction.createdAt.slice(0, 10) : todayISO());
+}
+
+function parseISODate(iso) {
+  return new Date(`${iso}T12:00:00`);
+}
+
+function weekStartISO(iso) {
+  const d = parseISODate(iso);
+  d.setDate(d.getDate() - d.getDay());
+  return isoFromDate(d);
+}
+
+function weekEndISO(iso) {
+  const d = parseISODate(weekStartISO(iso));
+  d.setDate(d.getDate() + 6);
+  return isoFromDate(d);
+}
+
 async function getProfile() {
   return getById("profiles", state.profileId);
 }
@@ -254,24 +284,95 @@ async function ensureInstances(profileId, date = dateKey) {
   }
 }
 
-async function addTransaction(profileId, kind, pointsDelta, source, note = "") {
+async function recomputeWallet(profileId) {
   const wallet = await getById("wallets", `wallet_${profileId}`);
-  const next = {
+  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId);
+  const balance = transactions.reduce((sum, t) => sum + Number(t.pointsDelta || 0), 0);
+  const lifetimeEarned = transactions.filter((t) => Number(t.pointsDelta) > 0).reduce((sum, t) => sum + Number(t.pointsDelta), 0);
+  const lifetimeSpent = transactions.filter((t) => Number(t.pointsDelta) < 0).reduce((sum, t) => sum + Math.abs(Number(t.pointsDelta)), 0);
+  await put("wallets", {
     ...wallet,
-    balance: wallet.balance + pointsDelta,
-    lifetimeEarned: wallet.lifetimeEarned + (pointsDelta > 0 ? pointsDelta : 0),
-    lifetimeSpent: wallet.lifetimeSpent + (pointsDelta < 0 ? Math.abs(pointsDelta) : 0)
-  };
-  await put("wallets", next);
+    balance,
+    lifetimeEarned,
+    lifetimeSpent
+  });
+}
+
+async function getDailyEarnedPoints(profileId, scoreDate) {
+  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId && t.kind === "earn" && scoreDateOf(t) === scoreDate);
+  return transactions.reduce((sum, t) => sum + Number(t.pointsDelta || 0), 0);
+}
+
+async function addTransaction(profileId, kind, pointsDelta, source, note = "", options = {}) {
+  const scoreDate = options.scoreDate || todayISO();
+  let safeDelta = Number(pointsDelta);
+  if (kind === "earn") {
+    const alreadyEarned = await getDailyEarnedPoints(profileId, scoreDate);
+    const leftToday = Math.max(0, DAILY_MAX_POINTS - alreadyEarned);
+    safeDelta = Math.min(Math.max(0, safeDelta), leftToday);
+  }
+  if (!Number.isFinite(safeDelta) || safeDelta === 0) return 0;
+
   await add("transactions", {
     profileId,
     kind,
     source,
-    pointsDelta,
-    balanceAfter: next.balance,
+    sourceId: options.sourceId ?? null,
+    pointsDelta: safeDelta,
+    scoreDate,
     note,
     createdAt: new Date().toISOString()
   });
+  await recomputeWallet(profileId);
+  return safeDelta;
+}
+
+async function removeEarnTransactionsForDate(profileId, scoreDate) {
+  const transactions = await getAll("transactions");
+  const toRemove = transactions.filter(
+    (t) =>
+      t.profileId === profileId &&
+      t.kind === "earn" &&
+      scoreDateOf(t) === scoreDate &&
+      ["task", "routine_bonus", "streak"].includes(t.source)
+  );
+  for (const t of toRemove) {
+    await del("transactions", t.id);
+  }
+}
+
+async function getScoreSummary(profileId, scoreDate = todayISO()) {
+  const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId && t.kind === "earn");
+  const byDate = new Map();
+  for (const t of transactions) {
+    const d = scoreDateOf(t);
+    byDate.set(d, (byDate.get(d) || 0) + Number(t.pointsDelta || 0));
+  }
+  const dailyRaw = byDate.get(scoreDate) || 0;
+  const daily = Math.min(DAILY_MAX_POINTS, dailyRaw);
+
+  const weekStart = weekStartISO(scoreDate);
+  const weekEnd = weekEndISO(scoreDate);
+  const weekly = [...byDate.entries()]
+    .filter(([d]) => d >= weekStart && d <= weekEnd)
+    .reduce((sum, [, value]) => sum + Math.min(DAILY_MAX_POINTS, value), 0);
+
+  const monthPrefix = scoreDate.slice(0, 7);
+  const monthly = [...byDate.entries()]
+    .filter(([d]) => d.startsWith(monthPrefix))
+    .reduce((sum, [, value]) => sum + Math.min(DAILY_MAX_POINTS, value), 0);
+
+  const monthDate = parseISODate(scoreDate);
+  const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+
+  return {
+    daily,
+    dailyCap: DAILY_MAX_POINTS,
+    weekly,
+    weeklyCap: DAILY_MAX_POINTS * 7,
+    monthly,
+    monthlyCap: DAILY_MAX_POINTS * daysInMonth
+  };
 }
 
 async function shouldRequireApproval(task) {
@@ -308,7 +409,7 @@ async function getScoring(profileId) {
   return scoring?.value?.[profileId] || defaultScoring[profileId];
 }
 
-async function calcTaskPoints(profileId, task, completionHM, routineType) {
+async function calcTaskPoints(profileId, task, completionHM, routineType, scaleFactor = 1) {
   const score = await getScoring(profileId);
   let points = task.basePoints;
 
@@ -325,7 +426,134 @@ async function calcTaskPoints(profileId, task, completionHM, routineType) {
     }
   }
 
-  return Math.max(points, 0);
+  return Math.max(0, Math.round(points * scaleFactor));
+}
+
+async function getTaskScaleFactor(profileId) {
+  const tasks = (await getAll("tasks")).filter((t) => t.profileId === profileId && t.active);
+  const rawTotal = tasks.reduce((sum, t) => sum + Number(t.basePoints || 0), 0);
+  if (rawTotal <= 0) return 1;
+  return TASKS_POINTS_BUDGET / rawTotal;
+}
+
+async function getTaskDisplayPoints(task, scale = null) {
+  const factor = scale ?? (await getTaskScaleFactor(task.profileId));
+  return Math.max(1, Math.round(Number(task.basePoints || 0) * factor));
+}
+
+async function getTaskDisplayMap(tasks) {
+  if (tasks.length === 0) return {};
+  const factor = await getTaskScaleFactor(tasks[0].profileId);
+  const pairs = await Promise.all(tasks.map(async (task) => [task.id, await getTaskDisplayPoints(task, factor)]));
+  return Object.fromEntries(pairs);
+}
+
+async function clearMilestoneMarkers(profileId, scoreDate) {
+  await del("meta", `celebrate_routine_${profileId}_${scoreDate}_morning`);
+  await del("meta", `celebrate_routine_${profileId}_${scoreDate}_afternoon`);
+  await del("meta", `celebrate_routine_${profileId}_${scoreDate}_evening`);
+  await del("meta", `medal_${profileId}_${scoreDate}`);
+}
+
+async function getStreakDaysEnding(profileId, date) {
+  let streakDays = 0;
+  const cursor = parseISODate(date);
+  for (let i = 0; i < 365; i += 1) {
+    const iso = isoFromDate(cursor);
+    const ok = await isDayQualified(profileId, iso);
+    if (!ok) break;
+    streakDays += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streakDays;
+}
+
+async function recomputeDailyScores(profileId, scoreDate) {
+  await removeEarnTransactionsForDate(profileId, scoreDate);
+
+  const tasks = (await getAll("tasks")).filter((t) => t.profileId === profileId && t.active);
+  const instances = await getInstancesForDate(profileId, scoreDate);
+  const scale = await getTaskScaleFactor(profileId);
+  const profile = await getById("profiles", profileId);
+  const planned = [];
+
+  for (const inst of instances) {
+    const task = tasks.find((t) => t.id === inst.taskId);
+    if (!task) continue;
+    if (inst.status === "approved") {
+      const completionHM = inst.completedAt || nowHM();
+      const points = await calcTaskPoints(profileId, task, completionHM, task.routineType, scale);
+      await put("taskInstances", { ...inst, pointsAwarded: points });
+      planned.push({
+        points,
+        source: "task",
+        sourceId: inst.id,
+        note: `${task.title} (${task.routineType})`
+      });
+    } else if (inst.pointsAwarded !== 0) {
+      await put("taskInstances", { ...inst, pointsAwarded: 0 });
+    }
+  }
+
+  const morningTasks = tasks.filter((t) => t.routineType === "morning");
+  if (morningTasks.length > 0) {
+    const allDoneMorning = morningTasks.every((task) => {
+      const inst = instances.find((x) => x.taskId === task.id);
+      return inst && inst.status === "approved";
+    });
+    if (allDoneMorning) {
+      const allOnTime = morningTasks.every((task) => {
+        const inst = instances.find((x) => x.taskId === task.id);
+        return inst && inst.completedAt && minutesBetween(inst.completedAt, profile.morningTarget) >= 0;
+      });
+      if (allOnTime) {
+        planned.push({
+          points: MORNING_BONUS_POINTS,
+          source: "routine_bonus",
+          sourceId: null,
+          note: "בונוס בוקר בזמן"
+        });
+      }
+    }
+  }
+
+  let streakDays = 0;
+  const qualified = await isDayQualified(profileId, scoreDate);
+  if (qualified) {
+    streakDays = await getStreakDaysEnding(profileId, scoreDate);
+    planned.push({
+      points: STREAK_BONUS_MAX,
+      source: "streak",
+      sourceId: null,
+      note: "בונוס עקביות יומי"
+    });
+  }
+
+  let appliedDaily = 0;
+  for (const row of planned) {
+    const left = DAILY_MAX_POINTS - appliedDaily;
+    if (left <= 0) break;
+    const points = Math.min(Math.max(0, row.points), left);
+    if (points <= 0) continue;
+    const actual = await addTransaction(profileId, "earn", points, row.source, row.note, {
+      scoreDate,
+      sourceId: row.sourceId
+    });
+    appliedDaily += actual;
+  }
+
+  const streakMeta = await getById("meta", `streak_${profileId}`);
+  if (streakMeta) {
+    await put("meta", {
+      ...streakMeta,
+      currentDays: qualified ? streakDays : 0,
+      bestDays: Math.max(streakMeta.bestDays || 0, qualified ? streakDays : 0),
+      lastQualifiedDate: qualified ? scoreDate : streakMeta.lastQualifiedDate,
+      lastRewardDate: qualified ? scoreDate : streakMeta.lastRewardDate
+    });
+  }
+
+  await recomputeWallet(profileId);
 }
 
 async function approveTask(instanceId, approved, approver = "parent") {
@@ -334,59 +562,44 @@ async function approveTask(instanceId, approved, approver = "parent") {
   if (!instance || !task) return;
 
   if (!approved) {
-    await put("taskInstances", { ...instance, status: "rejected", approvalBy: approver });
+    await put("taskInstances", { ...instance, status: "rejected", pointsAwarded: 0, approvalBy: approver });
+    await clearMilestoneMarkers(instance.profileId, instance.date);
+    await recomputeDailyScores(instance.profileId, instance.date);
     toast("המשימה נדחתה");
     render();
     return;
   }
 
   const completionHM = instance.completedAt || nowHM();
-  const points = await calcTaskPoints(instance.profileId, task, completionHM, task.routineType);
-
   await put("taskInstances", {
     ...instance,
     completedAt: completionHM,
     status: "approved",
-    pointsAwarded: points,
+    pointsAwarded: 0,
     approvalBy: approver
   });
-  await addTransaction(instance.profileId, "earn", points, "task", `${task.title} (${task.routineType})`);
-
-  await maybeRoutineBonus(instance.profileId, instance.date, "morning");
-  await maybeStreakBonus(instance.profileId, instance.date);
-
-  toast(`נוספו ${points} נקודות`);
+  await recomputeDailyScores(instance.profileId, instance.date);
+  await maybeCelebrateMilestones(instance.profileId, instance.date, task.routineType);
+  const summary = await getScoreSummary(instance.profileId, instance.date);
+  toast(`נקודות היום: ${summary.daily}/${DAILY_MAX_POINTS}`);
   render();
 }
 
-async function maybeRoutineBonus(profileId, date, routineType) {
-  if (routineType !== "morning") return;
-
-  const profile = await getById("profiles", profileId);
-  const tasks = await getTasksForRoutine(profileId, "morning");
-  const instances = await getInstancesForDate(profileId, date);
-  const scoring = await getScoring(profileId);
-  const done = tasks.every((task) => {
-    const inst = instances.find((x) => x.taskId === task.id);
-    return inst && inst.status === "approved";
+async function resetTaskInstance(instanceId) {
+  const instance = await getById("taskInstances", instanceId);
+  if (!instance) return;
+  await put("taskInstances", {
+    ...instance,
+    status: "pending",
+    completedAt: null,
+    pointsAwarded: 0,
+    approvalBy: null
   });
 
-  if (!done) return;
+  await clearMilestoneMarkers(instance.profileId, instance.date);
 
-  const allOnTime = tasks.every((task) => {
-    const inst = instances.find((x) => x.taskId === task.id);
-    return inst && inst.completedAt && minutesBetween(inst.completedAt, profile.morningTarget) >= 0;
-  });
-
-  if (!allOnTime) return;
-
-  const bonusKey = `bonus_morning_${profileId}_${date}`;
-  const marker = await getById("meta", bonusKey);
-  if (marker) return;
-
-  await addTransaction(profileId, "earn", scoring.routineBonusOnTime, "routine_bonus", "בונוס בוקר בזמן");
-  await put("meta", { id: bonusKey, value: true });
-  toast(`בונוס בוקר: +${scoring.routineBonusOnTime}`);
+  await recomputeDailyScores(instance.profileId, instance.date);
+  toast("הסימון אופס וחזר ללא בוצע");
 }
 
 async function isDayQualified(profileId, date) {
@@ -399,38 +612,6 @@ async function isDayQualified(profileId, date) {
     const inst = instances.find((x) => x.taskId === taskId);
     return inst && inst.status === "approved";
   });
-}
-
-function previousDate(iso) {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-async function maybeStreakBonus(profileId, date) {
-  const qualified = await isDayQualified(profileId, date);
-  if (!qualified) return;
-
-  const streak = await getById("meta", `streak_${profileId}`);
-  const scoring = await getScoring(profileId);
-
-  if (streak.lastRewardDate === date) return;
-
-  const isContinuous = streak.lastQualifiedDate && previousDate(date) === streak.lastQualifiedDate;
-  const currentDays = isContinuous ? streak.currentDays + 1 : 1;
-  const bestDays = Math.max(streak.bestDays, currentDays);
-  const bonus = Math.min(currentDays * scoring.streakBonusPerDay, scoring.streakCap);
-
-  await put("meta", {
-    ...streak,
-    currentDays,
-    bestDays,
-    lastQualifiedDate: date,
-    lastRewardDate: date
-  });
-
-  await addTransaction(profileId, "earn", bonus, "streak", `בונוס רצף ${currentDays} ימים`);
-  toast(`בונוס רצף: +${bonus}`);
 }
 
 async function redeemReward(rewardId) {
@@ -480,6 +661,96 @@ function statusTag(status) {
   return `<span class="tag warn">ממתין</span>`;
 }
 
+function statusLabel(status) {
+  if (status === "approved") return "בוצע";
+  if (status === "pending_approval") return "ממתין אישור";
+  if (status === "rejected") return "נדחה";
+  return "ממתין";
+}
+
+function launchConfettiFromButton(buttonElement) {
+  const rect = buttonElement.getBoundingClientRect();
+  const root = document.createElement("div");
+  root.className = "fx-layer";
+  const colors = ["#ff69b4", "#ffd84d", "#6ac6ff", "#8ce99a", "#c09bff", "#ff9f72"];
+  for (let i = 0; i < 28; i += 1) {
+    const dot = document.createElement("span");
+    dot.className = "fx-confetti";
+    dot.style.left = `${rect.left + rect.width / 2}px`;
+    dot.style.top = `${rect.top + rect.height / 2}px`;
+    dot.style.background = colors[i % colors.length];
+    dot.style.setProperty("--dx", `${(Math.random() - 0.5) * 260}px`);
+    dot.style.setProperty("--dy", `${-90 - Math.random() * 170}px`);
+    dot.style.animationDelay = `${Math.random() * 80}ms`;
+    root.appendChild(dot);
+  }
+  document.body.appendChild(root);
+  setTimeout(() => root.remove(), 900);
+}
+
+function launchFireworks() {
+  const root = document.createElement("div");
+  root.className = "fx-layer";
+  for (let i = 0; i < 60; i += 1) {
+    const dot = document.createElement("span");
+    dot.className = "fx-firework";
+    dot.textContent = ["✨", "🎆", "🌟", "💫"][i % 4];
+    dot.style.left = `${8 + Math.random() * 84}vw`;
+    dot.style.top = `${10 + Math.random() * 70}vh`;
+    dot.style.animationDelay = `${Math.random() * 400}ms`;
+    root.appendChild(dot);
+  }
+  document.body.appendChild(root);
+  setTimeout(() => root.remove(), 1700);
+}
+
+function showMedal(profileName) {
+  const medal = document.createElement("div");
+  medal.className = "medal-overlay";
+  medal.innerHTML = `
+    <div class="medal-card">
+      <div class="medal-icon">🏅</div>
+      <h2>כל הכבוד ${profileName}!</h2>
+      <p>השגת 100/100 נקודות היום</p>
+    </div>
+  `;
+  document.body.appendChild(medal);
+  setTimeout(() => medal.remove(), 2600);
+}
+
+async function isRoutineComplete(profileId, scoreDate, routineType) {
+  const tasks = (await getAll("tasks")).filter((t) => t.profileId === profileId && t.routineType === routineType && t.active);
+  if (tasks.length === 0) return false;
+  const instances = await getInstancesForDate(profileId, scoreDate);
+  return tasks.every((t) => {
+    const inst = instances.find((x) => x.taskId === t.id);
+    return inst && inst.status === "approved";
+  });
+}
+
+async function maybeCelebrateMilestones(profileId, scoreDate, routineType) {
+  if (await isRoutineComplete(profileId, scoreDate, routineType)) {
+    const routineKey = `celebrate_routine_${profileId}_${scoreDate}_${routineType}`;
+    const routineMarker = await getById("meta", routineKey);
+    if (!routineMarker) {
+      await put("meta", { id: routineKey, value: true, createdAt: new Date().toISOString() });
+      launchFireworks();
+    }
+  }
+
+  const summary = await getScoreSummary(profileId, scoreDate);
+  if (summary.daily >= DAILY_MAX_POINTS) {
+    const medalKey = `medal_${profileId}_${scoreDate}`;
+    const medalMarker = await getById("meta", medalKey);
+    if (!medalMarker) {
+      await put("meta", { id: medalKey, value: true, createdAt: new Date().toISOString() });
+      const profile = await getById("profiles", profileId);
+      showMedal(profile?.name || "אלופה");
+      launchFireworks();
+    }
+  }
+}
+
 async function renderProfiles() {
   const profiles = await getAll("profiles");
   app.innerHTML = `
@@ -513,6 +784,7 @@ async function renderProfiles() {
       state.profileId = btn.dataset.profile;
       state.screen = "home";
       await ensureInstances(state.profileId, dateKey);
+      await recomputeDailyScores(state.profileId, dateKey);
       render();
     });
   });
@@ -524,8 +796,9 @@ async function renderHome() {
   const profile = await getProfile();
   const instances = await getInstancesForDate(state.profileId, dateKey);
   const wallet = await getById("wallets", `wallet_${state.profileId}`);
+  const summary = await getScoreSummary(state.profileId, dateKey);
   const done = instances.filter((i) => i.status === "approved").length;
-  const percent = instances.length ? Math.round((done / instances.length) * 100) : 0;
+  const percent = Math.round((summary.daily / summary.dailyCap) * 100);
   const remaining = instances.filter((i) => i.status !== "approved");
 
   app.innerHTML = `
@@ -543,11 +816,14 @@ async function renderHome() {
       <div class="grid-2">
         <div class="card progress-wrap">
           <div class="ring" style="--p:${percent}" data-label="${percent}%"></div>
-          <p class="muted">התקדמות יומית</p>
+          <p class="muted">התקדמות לניקוד יומי</p>
         </div>
         <div class="card">
-          <p class="muted">נקודות בארנק</p>
-          <p class="points">${wallet.balance}</p>
+          <p class="muted">נקודות היום</p>
+          <p class="points">${summary.daily}/${summary.dailyCap}</p>
+          <p class="muted">שבועי: ${summary.weekly}/${summary.weeklyCap}</p>
+          <p class="muted">חודשי: ${summary.monthly}/${summary.monthlyCap}</p>
+          <p class="muted">יתרה בחנות תגמולים: ${wallet.balance}</p>
           <p class="muted">היום הושלמו ${done} מתוך ${instances.length}</p>
         </div>
       </div>
@@ -605,6 +881,7 @@ async function renderRoutine() {
   const profile = await getProfile();
   const tasks = await getTasksForRoutine(state.profileId, state.routine);
   const instances = await getInstancesForDate(state.profileId, dateKey);
+  const displayPointsByTaskId = await getTaskDisplayMap(tasks);
 
   const target = state.routine === "morning" ? profile.morningTarget : state.routine === "evening" ? profile.bedtimeTarget : "17:00";
   const leftMin = minutesBetween(nowHM(), target);
@@ -630,7 +907,7 @@ async function renderRoutine() {
                 <div>
                   <h3>${task.icon} ${task.title}</h3>
                   <div class="task-meta">
-                    <span>${task.basePoints} נק'</span>
+                    <span>${displayPointsByTaskId[task.id] || 0} נק'</span>
                     ${task.requiresParentApproval ? "<span>• אישור הורה</span>" : ""}
                     ${inst ? statusTag(inst.status) : ""}
                   </div>
@@ -654,6 +931,7 @@ async function renderRoutine() {
 
   app.querySelectorAll("[data-complete]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      launchConfettiFromButton(btn);
       await applyTaskCompletion(Number(btn.dataset.complete));
       render();
     });
@@ -672,6 +950,7 @@ async function renderHomework() {
   state.routine = "afternoon";
   const tasks = (await getTasksForRoutine(state.profileId, "afternoon")).filter((t) => t.title.includes("שיעורי") || t.title.includes("קריאה") || t.title.includes("בגדים"));
   const instances = await getInstancesForDate(state.profileId, dateKey);
+  const displayPointsByTaskId = await getTaskDisplayMap(tasks);
 
   app.innerHTML = `
     <section class="screen">
@@ -691,7 +970,7 @@ async function renderHomework() {
               <div>
                 <h3>${task.icon} ${task.title}</h3>
                 <div class="task-meta">
-                  <span>${task.basePoints} נק'</span>
+                  <span>${displayPointsByTaskId[task.id] || 0} נק'</span>
                   ${statusTag(inst?.status || "pending")}
                 </div>
               </div>
@@ -712,6 +991,7 @@ async function renderHomework() {
 
   app.querySelectorAll("[data-complete]").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      launchConfettiFromButton(btn);
       await applyTaskCompletion(Number(btn.dataset.complete));
       render();
     });
@@ -810,6 +1090,15 @@ async function renderAdmin() {
   const instances = await getAll("taskInstances");
   const pendingTasks = instances.filter((i) => i.status === "pending_approval");
   const pendingRewards = (await getAll("redemptions")).filter((r) => r.status === "pending_approval");
+  const tasksMap = new Map(tasks.map((t) => [t.id, t]));
+  const todayInstances = instances
+    .filter((i) => i.date === dateKey && ["approved", "pending_approval", "rejected"].includes(i.status))
+    .sort((a, b) => {
+      const ta = tasksMap.get(a.taskId);
+      const tb = tasksMap.get(b.taskId);
+      return (ta?.order || 0) - (tb?.order || 0);
+    });
+  const doneTodayInstances = todayInstances.filter((i) => i.status !== "pending");
 
   app.innerHTML = `
     <section class="screen">
@@ -830,6 +1119,24 @@ async function renderAdmin() {
           ${pendingRewards
       .map((r) => `<div class="row"><span>${r.rewardTitle} (${r.cost} נק')</span><div><button class="big-btn secondary" data-approve-redemption="${r.id}">אישור</button> <button class="big-btn warn" data-reject-redemption="${r.id}">דחייה</button></div></div>`)
       .join("") || "<p class='muted'>אין מימושים ממתינים</p>"}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>ביטול סימון שבוצע (היום)</h3>
+        <div class="list">
+          ${doneTodayInstances
+      .map((inst) => {
+        const task = tasksMap.get(inst.taskId);
+        return `<div class="task-item admin-reset-row">
+                <div>
+                  <h3>${task?.icon || "✅"} ${task?.title || "משימה"}</h3>
+                  <div class="task-meta"><span>${statusLabel(inst.status)}</span></div>
+                </div>
+                <button class="big-btn warn" data-reset-instance="${inst.id}">ביטול סימון</button>
+              </div>`;
+      })
+      .join("") || "<p class='muted'>אין סימונים שבוצעו היום</p>"}
         </div>
       </div>
 
@@ -921,6 +1228,12 @@ async function renderAdmin() {
 
   app.querySelectorAll("[data-approve-task]").forEach((btn) => btn.addEventListener("click", () => approveTask(Number(btn.dataset.approveTask), true, "parent")));
   app.querySelectorAll("[data-reject-task]").forEach((btn) => btn.addEventListener("click", () => approveTask(Number(btn.dataset.rejectTask), false, "parent")));
+  app.querySelectorAll("[data-reset-instance]").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      await resetTaskInstance(Number(btn.dataset.resetInstance));
+      render();
+    })
+  );
 
   app.querySelectorAll("[data-approve-redemption]").forEach((btn) =>
     btn.addEventListener("click", async () => {
@@ -988,6 +1301,8 @@ async function renderAdmin() {
     const all = await getAll("tasks");
     const maxOrder = Math.max(0, ...all.filter((t) => t.profileId === profileId && t.routineType === routineType).map((x) => x.order));
     await add("tasks", { profileId, routineType, title, icon, basePoints, requiresParentApproval: false, allowRandomApproval: true, order: maxOrder + 1, active: true });
+    await ensureInstances(profileId, dateKey);
+    await recomputeDailyScores(profileId, dateKey);
     toast("משימה נוספה");
     render();
   });
@@ -1045,6 +1360,7 @@ function toast(msg) {
 }
 
 async function render() {
+  dateKey = todayISO();
   if (!state.profileId && state.screen !== "admin") state.screen = "profiles";
 
   if (state.profileId) await ensureInstances(state.profileId, dateKey);
@@ -1061,10 +1377,15 @@ async function bootstrap() {
   state.db = await openDB();
   await seedIfNeeded();
   await enforceProfileNames();
+  const profiles = await getAll("profiles");
+  for (const profile of profiles) {
+    await ensureInstances(profile.id, dateKey);
+    await recomputeDailyScores(profile.id, dateKey);
+  }
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=3");
+    navigator.serviceWorker.register("sw.js?v=5");
   }
 }
 
