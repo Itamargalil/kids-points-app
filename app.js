@@ -52,7 +52,8 @@ const state = {
   screen: "profiles",
   routine: "morning",
   db: null,
-  parentAuthorized: false
+  parentAuthorized: false,
+  afterParentAuthAction: null
 };
 
 function openDB() {
@@ -902,6 +903,8 @@ async function renderRoutine() {
         const inst = instances.find((i) => i.taskId === task.id);
         const done = inst?.status === "approved";
         const pending = inst?.status === "pending_approval";
+        const doneBtnClass = state.parentAuthorized ? "warn" : "ghost";
+        const doneBtnLabel = state.parentAuthorized ? "בטל" : "בטל (הורה)";
         return `
               <article class="task-item ${done ? "done" : pending ? "pending" : ""}">
                 <div>
@@ -912,9 +915,13 @@ async function renderRoutine() {
                     ${inst ? statusTag(inst.status) : ""}
                   </div>
                 </div>
-                <button class="big-btn ${done || pending ? "ghost" : "secondary"}" data-complete="${inst.id}" ${done || pending ? "disabled" : ""}>
-                  ${done ? "בוצע" : pending ? "ממתין" : "סימון"}
-                </button>
+                ${
+                  done
+                    ? `<button class="big-btn ${doneBtnClass}" data-uncomplete="${inst.id}">${doneBtnLabel}</button>`
+                    : pending
+                      ? `<button class="big-btn ghost" disabled>ממתין</button>`
+                      : `<button class="big-btn secondary" data-complete="${inst.id}">סימון</button>`
+                }
               </article>
             `;
       })
@@ -933,6 +940,21 @@ async function renderRoutine() {
     btn.addEventListener("click", async () => {
       launchConfettiFromButton(btn);
       await applyTaskCompletion(Number(btn.dataset.complete));
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-uncomplete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.uncomplete);
+      if (!state.parentAuthorized) {
+        await openParentGate(async () => {
+          await resetTaskInstance(id);
+          render();
+        });
+        return;
+      }
+      await resetTaskInstance(id);
       render();
     });
   });
@@ -965,8 +987,12 @@ async function renderHomework() {
       ${tasks
       .map((task) => {
         const inst = instances.find((i) => i.taskId === task.id);
+        const isDone = inst?.status === "approved";
+        const isPending = inst?.status === "pending_approval";
+        const doneBtnClass = state.parentAuthorized ? "warn" : "ghost";
+        const doneBtnLabel = state.parentAuthorized ? "בטל" : "בטל (הורה)";
         return `
-            <article class="task-item ${inst?.status === "approved" ? "done" : inst?.status === "pending_approval" ? "pending" : ""}">
+            <article class="task-item ${isDone ? "done" : isPending ? "pending" : ""}">
               <div>
                 <h3>${task.icon} ${task.title}</h3>
                 <div class="task-meta">
@@ -974,7 +1000,13 @@ async function renderHomework() {
                   ${statusTag(inst?.status || "pending")}
                 </div>
               </div>
-              <button class="big-btn ${inst?.status === "approved" || inst?.status === "pending_approval" ? "ghost" : "secondary"}" data-complete="${inst.id}" ${inst?.status === "approved" || inst?.status === "pending_approval" ? "disabled" : ""}>${inst?.status === "approved" ? "בוצע" : inst?.status === "pending_approval" ? "ממתין" : "סימון"}</button>
+              ${
+                isDone
+                  ? `<button class="big-btn ${doneBtnClass}" data-uncomplete="${inst.id}">${doneBtnLabel}</button>`
+                  : isPending
+                    ? `<button class="big-btn ghost" disabled>ממתין</button>`
+                    : `<button class="big-btn secondary" data-complete="${inst.id}">סימון</button>`
+              }
             </article>
           `;
       })
@@ -993,6 +1025,21 @@ async function renderHomework() {
     btn.addEventListener("click", async () => {
       launchConfettiFromButton(btn);
       await applyTaskCompletion(Number(btn.dataset.complete));
+      render();
+    });
+  });
+
+  app.querySelectorAll("[data-uncomplete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.uncomplete);
+      if (!state.parentAuthorized) {
+        await openParentGate(async () => {
+          await resetTaskInstance(id);
+          render();
+        });
+        return;
+      }
+      await resetTaskInstance(id);
       render();
     });
   });
@@ -1059,7 +1106,8 @@ async function renderRewards() {
   bindNav();
 }
 
-async function openParentGate() {
+async function openParentGate(afterAuthAction = null) {
+  state.afterParentAuthAction = afterAuthAction;
   pinInput.value = "";
   pinError.textContent = "";
   pinDialog.showModal();
@@ -1075,8 +1123,14 @@ pinForm.addEventListener("submit", async (e) => {
   }
 
   state.parentAuthorized = true;
-  state.screen = "admin";
   pinDialog.close();
+  if (state.afterParentAuthAction) {
+    const action = state.afterParentAuthAction;
+    state.afterParentAuthAction = null;
+    await action();
+    return;
+  }
+  state.screen = "admin";
   render();
 });
 
@@ -1385,7 +1439,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=5");
+    navigator.serviceWorker.register("sw.js?v=6");
   }
 }
 
