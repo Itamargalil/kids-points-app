@@ -726,7 +726,7 @@ function showRoutineCompletionModal(profileName, routineType) {
     <div class="routine-win-card">
       <div class="routine-win-emoji">🌈✨</div>
       <h2>כל הכבוד ${profileName}!</h2>
-      <p>סיימת בהצלחה את בלוק ${routineLabel(routineType)}</p>
+      <p>סיימת בהצלחה את משימות ה${routineLabel(routineType)}</p>
       <button class="big-btn secondary" id="routineWinHomeBtn">חזרה לתפריט הראשי</button>
     </div>
   `;
