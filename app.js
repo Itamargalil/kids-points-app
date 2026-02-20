@@ -53,8 +53,150 @@ const state = {
   routine: "morning",
   db: null,
   parentAuthorized: false,
-  afterParentAuthAction: null
+  afterParentAuthAction: null,
+  learnQuestions: {},
+  learnStats: {}
 };
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function shuffled(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+const LEARN_MODULES_OLDER = [
+  {
+    id: "eng",
+    icon: "🇬🇧",
+    title: "אנגלית",
+    subtitle: "אוצר מילים 10+",
+    generate() {
+      const words = [
+        ["שמש", "sun"],
+        ["ספר", "book"],
+        ["מים", "water"],
+        ["חלון", "window"],
+        ["כוכב", "star"],
+        ["עץ", "tree"],
+        ["בית", "house"],
+        ["חתול", "cat"]
+      ];
+      const pair = words[randInt(0, words.length - 1)];
+      const distractors = shuffled(words.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
+      const options = shuffled([pair[1], ...distractors]);
+      return {
+        prompt: `מה התרגום של "${pair[0]}"?`,
+        options,
+        answer: pair[1]
+      };
+    }
+  },
+  {
+    id: "math",
+    icon: "➕",
+    title: "חשבון ומתמטיקה",
+    subtitle: "תרגילים מהירים",
+    generate() {
+      const a = randInt(6, 25);
+      const b = randInt(3, 12);
+      const isPlus = Math.random() > 0.45;
+      const answer = isPlus ? a + b : a - b;
+      const prompt = isPlus ? `כמה זה ${a} + ${b} ?` : `כמה זה ${a} - ${b} ?`;
+      const options = shuffled([answer, answer + 1, answer - 1, answer + 3].filter((x, i, arr) => arr.indexOf(x) === i));
+      return {
+        prompt,
+        options: options.slice(0, 4),
+        answer
+      };
+    }
+  },
+  {
+    id: "geo",
+    icon: "📐",
+    title: "גאומטריה",
+    subtitle: "זיהוי צורות",
+    generate() {
+      const shapes = [
+        ["🔺", "משולש"],
+        ["🟦", "ריבוע"],
+        ["⚪", "עיגול"],
+        ["🔶", "מעוין"]
+      ];
+      const pair = shapes[randInt(0, shapes.length - 1)];
+      const distractors = shuffled(shapes.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
+      const options = shuffled([pair[1], ...distractors]);
+      return {
+        prompt: `איזו צורה רואים? ${pair[0]}`,
+        options,
+        answer: pair[1]
+      };
+    }
+  }
+];
+
+const LEARN_MODULES_YOUNGER = [
+  {
+    id: "count",
+    icon: "🔢",
+    title: "ספירה לגיל 4-5",
+    subtitle: "כמה יש בתמונה?",
+    generate() {
+      const n = randInt(1, 6);
+      const prompt = `כמה תפוחים יש כאן? ${"🍎".repeat(n)}`;
+      const options = shuffled([n, Math.max(1, n - 1), Math.min(6, n + 1), randInt(1, 6)].filter((x, i, arr) => arr.indexOf(x) === i)).slice(0, 4);
+      return { prompt, options, answer: n };
+    }
+  },
+  {
+    id: "colors",
+    icon: "🎨",
+    title: "צבעים",
+    subtitle: "זיהוי צבע",
+    generate() {
+      const colors = [
+        ["🟦", "כחול"],
+        ["🟥", "אדום"],
+        ["🟩", "ירוק"],
+        ["🟨", "צהוב"]
+      ];
+      const pair = colors[randInt(0, colors.length - 1)];
+      const distractors = shuffled(colors.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
+      return {
+        prompt: `איזה צבע זה? ${pair[0]}`,
+        options: shuffled([pair[1], ...distractors]),
+        answer: pair[1]
+      };
+    }
+  },
+  {
+    id: "shapes",
+    icon: "🧩",
+    title: "צורות פשוטות",
+    subtitle: "מה הצורה?",
+    generate() {
+      const shapes = [
+        ["⚪", "עיגול"],
+        ["🟦", "ריבוע"],
+        ["🔺", "משולש"],
+        ["❤️", "לב"]
+      ];
+      const pair = shapes[randInt(0, shapes.length - 1)];
+      const distractors = shuffled(shapes.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
+      return {
+        prompt: `איזו צורה זאת? ${pair[0]}`,
+        options: shuffled([pair[1], ...distractors]),
+        answer: pair[1]
+      };
+    }
+  }
+];
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -900,6 +1042,7 @@ function bottomNav(withHomework) {
       <button data-nav="morning" class="${state.screen === "routine" && state.routine === "morning" ? "active" : ""}">בוקר</button>
       <button data-nav="afternoon" class="${state.screen === "routine" && state.routine === "afternoon" ? "active" : ""}">אחרי מסגרת</button>
       <button data-nav="evening" class="${state.screen === "routine" && state.routine === "evening" ? "active" : ""}">ערב</button>
+      <button data-nav="learn" class="${state.screen === "learn" ? "active" : ""}">לימודים</button>
       <button data-nav="rewards" class="${state.screen === "rewards" ? "active" : ""}">תגמולים</button>
       <button data-nav="${withHomework ? "homework" : "home"}" class="${state.screen === "homework" ? "active" : ""}">${withHomework ? "שיעורים" : "בית"}</button>
     </nav>
@@ -1083,6 +1226,90 @@ async function renderHomework() {
         return;
       }
       await resetTaskInstance(id);
+      render();
+    });
+  });
+
+  bindNav();
+}
+
+function ensureLearnModuleState(modules) {
+  for (const module of modules) {
+    if (!state.learnQuestions[module.id]) {
+      state.learnQuestions[module.id] = module.generate();
+    }
+    if (!state.learnStats[module.id]) {
+      state.learnStats[module.id] = { correct: 0, total: 0 };
+    }
+  }
+}
+
+async function renderLearnPlay() {
+  const profile = await getProfile();
+  const modules = profile.age >= 9 ? LEARN_MODULES_OLDER : LEARN_MODULES_YOUNGER;
+  ensureLearnModuleState(modules);
+
+  app.innerHTML = `
+    <section class="screen">
+      <div class="card row">
+        <div>
+          <h1>📚 לימודים ומשחקים</h1>
+          <p class="muted">${profile.age >= 9 ? "תוכן מותאם גיל 10+" : "תוכן מותאם גיל 4-5"}</p>
+        </div>
+        <button class="big-btn ghost" id="learnToHome">היום שלי</button>
+      </div>
+
+      <div class="learn-grid">
+        ${modules
+      .map((module) => {
+        const q = state.learnQuestions[module.id];
+        const stats = state.learnStats[module.id];
+        return `
+            <article class="card learn-card">
+              <div class="row">
+                <h3>${module.icon} ${module.title}</h3>
+                <span class="tag ok">${stats.correct}/${stats.total} נכון</span>
+              </div>
+              <p class="muted">${module.subtitle}</p>
+              <p class="learn-question">${q.prompt}</p>
+              <div class="learn-options">
+                ${q.options
+              .map(
+                (opt) => `<button class="big-btn secondary learn-option-btn" data-learn-answer="${module.id}" data-value="${String(opt)}">${opt}</button>`
+              )
+              .join("")}
+              </div>
+            </article>
+          `;
+      })
+      .join("")}
+      </div>
+    </section>
+    ${bottomNav(profile.age >= 9)}
+  `;
+
+  document.getElementById("learnToHome").addEventListener("click", () => {
+    state.screen = "home";
+    render();
+  });
+
+  app.querySelectorAll("[data-learn-answer]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const moduleId = btn.dataset.learnAnswer;
+      const module = modules.find((m) => m.id === moduleId);
+      if (!module) return;
+      const answer = state.learnQuestions[moduleId].answer;
+      const chosen = btn.dataset.value;
+      const isCorrect = String(answer) === String(chosen);
+      state.learnStats[moduleId].total += 1;
+      if (isCorrect) {
+        state.learnStats[moduleId].correct += 1;
+        launchConfettiFromButton(btn);
+        toast("נכון! כל הכבוד!");
+      } else {
+        toast(`כמעט! התשובה הנכונה: ${answer}`);
+      }
+      state.learnQuestions[moduleId] = module.generate();
       render();
     });
   });
@@ -1485,6 +1712,7 @@ async function render() {
   if (state.screen === "profiles") return renderProfiles();
   if (state.screen === "home") return renderHome();
   if (state.screen === "routine") return renderRoutine();
+  if (state.screen === "learn") return renderLearnPlay();
   if (state.screen === "rewards") return renderRewards();
   if (state.screen === "homework") return renderHomework();
   if (state.screen === "admin") return renderAdmin();
@@ -1504,7 +1732,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=11");
+    navigator.serviceWorker.register("sw.js?v=12");
   }
 }
 

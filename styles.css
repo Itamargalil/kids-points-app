@@ -267,7 +267,7 @@ select {
   border-top: 1px solid #e8edf5;
   padding: 8px;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 6px;
 }
 
@@ -375,6 +375,36 @@ label {
 
 .admin-reset-row {
   grid-template-columns: 1fr auto;
+}
+
+.learn-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.learn-card {
+  display: grid;
+  gap: 10px;
+  border: 2px solid #f0d8ff;
+  background: linear-gradient(180deg, #fff, #fff9ff);
+}
+
+.learn-question {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #4a2f87;
+}
+
+.learn-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.learn-option-btn {
+  min-height: 58px;
+  white-space: normal;
 }
 
 .medal-overlay {
