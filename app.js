@@ -61,6 +61,9 @@ const stores = [
   "meta"
 ];
 
+const DAILY_POINTS_SOURCES = new Set(["task", "routine_bonus", "streak"]);
+const LEARN_POINTS_SOURCES = new Set(["learn"]);
+
 const state = {
   profileId: null,
   screen: "profiles",
@@ -390,7 +393,19 @@ async function seedIfNeeded() {
 
   for (const profile of seedProfiles) {
     await put("profiles", profile);
-    await put("wallets", { id: `wallet_${profile.id}`, profileId: profile.id, balance: 0, lifetimeEarned: 0, lifetimeSpent: 0 });
+    await put("wallets", {
+      id: `wallet_${profile.id}`,
+      profileId: profile.id,
+      balanceDaily: 0,
+      balanceLearn: 0,
+      lifetimeEarnedDaily: 0,
+      lifetimeEarnedLearn: 0,
+      lifetimeSpentDaily: 0,
+      lifetimeSpentLearn: 0,
+      balance: 0,
+      lifetimeEarned: 0,
+      lifetimeSpent: 0
+    });
     await put("meta", { id: `streak_${profile.id}`, profileId: profile.id, currentDays: 0, bestDays: 0, lastQualifiedDate: null, lastRewardDate: null });
   }
 
@@ -570,12 +585,39 @@ async function ensureInstances(profileId, date = dateKey) {
 async function recomputeWallet(profileId) {
   const wallet = await getById("wallets", `wallet_${profileId}`);
   const transactions = (await getAll("transactions")).filter((t) => t.profileId === profileId);
-  const balance = transactions.reduce((sum, t) => sum + Number(t.pointsDelta || 0), 0);
-  const lifetimeEarned = transactions.filter((t) => Number(t.pointsDelta) > 0).reduce((sum, t) => sum + Number(t.pointsDelta), 0);
-  const lifetimeSpent = transactions.filter((t) => Number(t.pointsDelta) < 0).reduce((sum, t) => sum + Math.abs(Number(t.pointsDelta)), 0);
+  let balanceDaily = 0;
+  let balanceLearn = 0;
+  let lifetimeEarnedDaily = 0;
+  let lifetimeEarnedLearn = 0;
+  let lifetimeSpentDaily = 0;
+  let lifetimeSpentLearn = 0;
+
+  for (const t of transactions) {
+    const delta = Number(t.pointsDelta || 0);
+    const isLearn = LEARN_POINTS_SOURCES.has(t.source);
+
+    if (isLearn) {
+      balanceLearn += delta;
+      if (delta > 0) lifetimeEarnedLearn += delta;
+      if (delta < 0) lifetimeSpentLearn += Math.abs(delta);
+    } else {
+      balanceDaily += delta;
+      if (delta > 0) lifetimeEarnedDaily += delta;
+      if (delta < 0) lifetimeSpentDaily += Math.abs(delta);
+    }
+  }
+
+  const lifetimeEarned = lifetimeEarnedDaily + lifetimeEarnedLearn;
+  const lifetimeSpent = lifetimeSpentDaily + lifetimeSpentLearn;
   await put("wallets", {
     ...wallet,
-    balance,
+    balanceDaily,
+    balanceLearn,
+    lifetimeEarnedDaily,
+    lifetimeEarnedLearn,
+    lifetimeSpentDaily,
+    lifetimeSpentLearn,
+    balance: balanceDaily,
     lifetimeEarned,
     lifetimeSpent
   });
@@ -598,7 +640,7 @@ async function addTransaction(profileId, kind, pointsDelta, source, note = "", o
       const leftLearn = Math.max(0, LEARN_DAILY_CAP - alreadyLearned);
       safeDelta = Math.min(Math.max(0, safeDelta), leftLearn);
     } else {
-      const alreadyEarned = await getDailyEarnedPoints(profileId, scoreDate, ["task", "routine_bonus", "streak"]);
+      const alreadyEarned = await getDailyEarnedPoints(profileId, scoreDate, [...DAILY_POINTS_SOURCES]);
       const leftToday = Math.max(0, DAILY_MAX_POINTS - alreadyEarned);
       safeDelta = Math.min(Math.max(0, safeDelta), leftToday);
     }
@@ -626,7 +668,7 @@ async function removeEarnTransactionsForDate(profileId, scoreDate) {
       t.profileId === profileId &&
       t.kind === "earn" &&
       scoreDateOf(t) === scoreDate &&
-      ["task", "routine_bonus", "streak"].includes(t.source)
+      DAILY_POINTS_SOURCES.has(t.source)
   );
   for (const t of toRemove) {
     await del("transactions", t.id);
@@ -635,7 +677,7 @@ async function removeEarnTransactionsForDate(profileId, scoreDate) {
 
 async function getScoreSummary(profileId, scoreDate = todayISO()) {
   const transactions = (await getAll("transactions")).filter(
-    (t) => t.profileId === profileId && t.kind === "earn" && ["task", "routine_bonus", "streak"].includes(t.source)
+    (t) => t.profileId === profileId && t.kind === "earn" && DAILY_POINTS_SOURCES.has(t.source)
   );
   const byDate = new Map();
   for (const t of transactions) {
@@ -947,7 +989,7 @@ async function redeemReward(rewardId) {
   const wallet = await getById("wallets", `wallet_${state.profileId}`);
   if (!reward || !reward.active) return;
 
-  if (wallet.balance < reward.cost) {
+  if ((wallet?.balanceDaily || 0) < reward.cost) {
     toast("אין מספיק נקודות");
     return;
   }
@@ -1173,7 +1215,8 @@ async function renderHome() {
           <p class="muted">שבועי: ${ratioLtr(summary.weekly, summary.weeklyCap)}</p>
           <p class="muted">חודשי: ${ratioLtr(summary.monthly, summary.monthlyCap)}</p>
           <p class="muted">לימודים היום: ${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
-          <p class="muted">יתרה בחנות תגמולים: ${numLtr(wallet.balance)}</p>
+          <p class="muted">יתרת משימות (לתגמולים): ${numLtr(wallet?.balanceDaily || 0)}</p>
+          <p class="muted">יתרת לימודים נפרדת: ${numLtr(wallet?.balanceLearn || 0)}</p>
           <p class="muted">היום הושלמו ${numLtr(done)} מתוך ${numLtr(instances.length)}</p>
         </div>
       </div>
@@ -1411,6 +1454,7 @@ function ensureLearnModuleState(modules) {
 
 async function renderLearnPlay() {
   const profile = await getProfile();
+  const wallet = await getById("wallets", `wallet_${state.profileId}`);
   const modules = profile.age >= 9 ? LEARN_MODULES_OLDER : LEARN_MODULES_YOUNGER;
   ensureLearnModuleState(modules);
   const learnSummary = await getLearnSummary(state.profileId, dateKey);
@@ -1430,6 +1474,7 @@ async function renderLearnPlay() {
         <p class="points">${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
         <p class="muted">שבועי לימודים: ${ratioLtr(learnSummary.weekly, learnSummary.weeklyCap)}</p>
         <p class="muted">חודשי לימודים: ${ratioLtr(learnSummary.monthly, learnSummary.monthlyCap)}</p>
+        <p class="muted">יתרת לימודים מצטברת: ${numLtr(wallet?.balanceLearn || 0)}</p>
       </div>
 
       <div class="learn-grid">
@@ -1516,8 +1561,9 @@ async function renderRewards() {
       <div class="card row">
         <div>
           <h1>חנות תגמולים</h1>
-          <p class="muted">יתרה נוכחית</p>
-          <p class="points">${numLtr(wallet.balance)}</p>
+          <p class="muted">יתרת משימות לתגמולים</p>
+          <p class="points">${numLtr(wallet?.balanceDaily || 0)}</p>
+          <p class="muted">יתרת לימודים נשמרת בנפרד: ${numLtr(wallet?.balanceLearn || 0)}</p>
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
       </div>
@@ -1531,7 +1577,7 @@ async function renderRewards() {
                   <h3>${r.title}</h3>
                   <div class="task-meta"><span>${numLtr(r.cost)} נק'</span> ${r.requiresApproval ? "<span>• דורש אישור הורה</span>" : ""}</div>
                 </div>
-                <button class="big-btn" data-redeem="${r.id}" ${wallet.balance < r.cost ? "disabled" : ""}>מימוש</button>
+                <button class="big-btn" data-redeem="${r.id}" ${(wallet?.balanceDaily || 0) < r.cost ? "disabled" : ""}>מימוש</button>
               </article>
             `
       )
@@ -1876,6 +1922,11 @@ async function restoreData(event) {
         await put(s, item);
       }
     }
+    const profiles = await getAll("profiles");
+    for (const profile of profiles) {
+      await ensureInstances(profile.id, dateKey);
+      await recomputeWallet(profile.id);
+    }
     toast("שחזור הושלם");
     render();
   } catch {
@@ -1917,11 +1968,12 @@ async function bootstrap() {
   for (const profile of profiles) {
     await ensureInstances(profile.id, dateKey);
     await recomputeDailyScores(profile.id, dateKey);
+    await recomputeWallet(profile.id);
   }
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=15");
+    navigator.serviceWorker.register("sw.js?v=16");
   }
 }
 
