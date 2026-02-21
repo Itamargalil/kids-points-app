@@ -61,7 +61,7 @@ const stores = [
   "meta"
 ];
 
-const DAILY_POINTS_SOURCES = new Set(["task", "routine_bonus", "streak"]);
+const DAILY_POINTS_SOURCES = new Set(["task", "routine_bonus", "streak", "daily_completion"]);
 const LEARN_POINTS_SOURCES = new Set(["learn"]);
 
 const state = {
@@ -956,6 +956,19 @@ async function recomputeDailyScores(profileId, scoreDate) {
     appliedDaily += actual;
   }
 
+  if (qualified && appliedDaily < DAILY_MAX_POINTS) {
+    const completionTopUp = DAILY_MAX_POINTS - appliedDaily;
+    const actualTopUp = await addTransaction(
+      profileId,
+      "earn",
+      completionTopUp,
+      "daily_completion",
+      "השלמה ל-100 על כל משימות היום",
+      { scoreDate }
+    );
+    appliedDaily += actualTopUp;
+  }
+
   const streakMeta = await getById("meta", `streak_${profileId}`);
   if (streakMeta) {
     await put("meta", {
@@ -1254,11 +1267,11 @@ async function renderHome() {
           <p class="muted">התקדמות לניקוד יומי</p>
         </div>
         <div class="card">
-          <p class="muted">נקודות היום</p>
+          <p class="muted">ניקוד משימות יומי (נפרד מלימודים)</p>
           <p class="points">${ratioLtr(summary.daily, summary.dailyCap)}</p>
           <p class="muted">שבועי: ${ratioLtr(summary.weekly, summary.weeklyCap)}</p>
           <p class="muted">חודשי: ${ratioLtr(summary.monthly, summary.monthlyCap)}</p>
-          <p class="muted">לימודים היום: ${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
+          <p class="muted">ניקוד לימודים יומי (נפרד): ${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
           <p class="muted">יתרת משימות (לתגמולים): ${numLtr(wallet?.balanceDaily || 0)}</p>
           <p class="muted">יתרת לימודים נפרדת: ${numLtr(wallet?.balanceLearn || 0)}</p>
           <p class="muted">היום הושלמו ${numLtr(done)} מתוך ${numLtr(instances.length)}</p>
@@ -2017,7 +2030,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=17");
+    navigator.serviceWorker.register("sw.js?v=18");
   }
 }
 
