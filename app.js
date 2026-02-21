@@ -381,6 +381,23 @@ const seedRewards = [
 
 const APPROVAL_FREE_TASK_TITLES = new Set(["לקום", "לאכול", "תיק מוכן"]);
 const SOPHIA_HOMEWORK_TITLES = new Set(["שיעורי בית", "קריאה 15 דקות", "הכנת בגדים למחר"]);
+const SOPHIA_AFTERSCHOOL_TITLES = new Set(["חטיף בריא", "מנוחה 15 דקות", "עזרה בבית 10 דקות"]);
+
+function normalizeHebrewTitle(value = "") {
+  return String(value)
+    .toLowerCase()
+    .replace(/["'`׳״]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSophiaHomeworkTitle(title = "") {
+  const normalized = normalizeHebrewTitle(title);
+  if (!normalized) return false;
+  if (SOPHIA_HOMEWORK_TITLES.has(title)) return true;
+  const keywords = ["שיעור", "שיעורי", "קריאה", "אנגלית", "חשבון", "מתמט", "גאומטר", "בגדים למחר"];
+  return keywords.some((k) => normalized.includes(k));
+}
 
 const defaultScoring = {
   child9: { routineBonusOnTime: 20, streakBonusPerDay: 2, streakCap: 12, lateThresholdMin: 20, latePenaltyMode: "partial", partialPenaltyPercent: 50 },
@@ -456,13 +473,21 @@ async function ensureHomeworkSplitForSophia() {
   const sophiaTasks = tasks.filter((t) => t.profileId === "child9");
 
   let homeworkOrder = 1;
+  let afternoonOrder = 1;
   for (const task of sophiaTasks) {
-    if (SOPHIA_HOMEWORK_TITLES.has(task.title) && task.routineType !== "homework") {
-      await put("tasks", { ...task, routineType: "homework", order: homeworkOrder });
+    const isHomework = isSophiaHomeworkTitle(task.title);
+    if (isHomework && task.routineType !== "homework") {
+      await put("tasks", { ...task, routineType: "homework", order: homeworkOrder, active: true });
       homeworkOrder += 1;
-    } else if (SOPHIA_HOMEWORK_TITLES.has(task.title)) {
-      await put("tasks", { ...task, order: homeworkOrder });
+    } else if (isHomework) {
+      await put("tasks", { ...task, order: homeworkOrder, active: true });
       homeworkOrder += 1;
+    } else if (task.routineType === "homework") {
+      await put("tasks", { ...task, routineType: "afternoon", order: afternoonOrder, active: true });
+      afternoonOrder += 1;
+    } else if (task.routineType === "afternoon") {
+      await put("tasks", { ...task, order: afternoonOrder, active: true });
+      afternoonOrder += 1;
     }
   }
 
@@ -473,11 +498,13 @@ async function ensureHomeworkSplitForSophia() {
   ];
 
   const updatedTasks = await getAll("tasks");
-  const sophiaAfter = updatedTasks.filter((t) => t.profileId === "child9" && t.routineType === "afternoon");
+  const sophiaAfter = updatedTasks.filter(
+    (t) => t.profileId === "child9" && t.routineType === "afternoon" && SOPHIA_AFTERSCHOOL_TITLES.has(t.title)
+  );
   let nextOrder = Math.max(0, ...sophiaAfter.map((t) => t.order || 0)) + 1;
 
   for (const tpl of afterSchoolTemplates) {
-    const exists = updatedTasks.find((t) => t.profileId === "child9" && t.routineType === "afternoon" && t.title === tpl.title);
+    const exists = updatedTasks.find((t) => t.profileId === "child9" && t.title === tpl.title);
     if (!exists) {
       await add("tasks", {
         profileId: "child9",
@@ -490,6 +517,9 @@ async function ensureHomeworkSplitForSophia() {
         order: nextOrder,
         active: true
       });
+      nextOrder += 1;
+    } else if (exists.routineType !== "afternoon" || !exists.active) {
+      await put("tasks", { ...exists, routineType: "afternoon", active: true, order: nextOrder });
       nextOrder += 1;
     }
   }
@@ -544,7 +574,21 @@ async function getProfile() {
 
 async function getTasksForRoutine(profileId, routineType) {
   const tasks = await getAll("tasks");
-  return tasks.filter((t) => t.profileId === profileId && t.routineType === routineType && t.active).sort((a, b) => a.order - b.order);
+  const profileTasks = tasks.filter((t) => t.profileId === profileId && t.active);
+
+  if (profileId === "child9" && routineType === "homework") {
+    return profileTasks
+      .filter((t) => (t.routineType === "homework" || t.routineType === "afternoon") && isSophiaHomeworkTitle(t.title))
+      .sort((a, b) => a.order - b.order);
+  }
+
+  if (profileId === "child9" && routineType === "afternoon") {
+    return profileTasks
+      .filter((t) => (t.routineType === "afternoon" || t.routineType === "homework") && !isSophiaHomeworkTitle(t.title))
+      .sort((a, b) => a.order - b.order);
+  }
+
+  return profileTasks.filter((t) => t.routineType === routineType).sort((a, b) => a.order - b.order);
 }
 
 async function getInstancesForDate(profileId, date) {
@@ -1973,7 +2017,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=16");
+    navigator.serviceWorker.register("sw.js?v=17");
   }
 }
 
