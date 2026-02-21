@@ -27,6 +27,18 @@ function greetingByTime(date = new Date()) {
   return "ערב טוב";
 }
 
+function numLtr(value) {
+  return `<span class="num-ltr">${value}</span>`;
+}
+
+function ratioLtr(a, b) {
+  return `<span class="num-ltr">${a}/${b}</span>`;
+}
+
+function mathExpr(expr) {
+  return `<span class="num-ltr">${expr}</span>`;
+}
+
 let dateKey = todayISO();
 const DB_NAME = "KidsPointsApp";
 const DB_VERSION = 1;
@@ -78,43 +90,79 @@ const LEARN_MODULES_OLDER = [
     id: "eng",
     icon: "🇬🇧",
     title: "אנגלית",
-    subtitle: "אוצר מילים 10+",
+    subtitle: "דקדוק ואוצר מילים (10+)",
     generate() {
-      const words = [
-        ["שמש", "sun"],
-        ["ספר", "book"],
-        ["מים", "water"],
-        ["חלון", "window"],
-        ["כוכב", "star"],
-        ["עץ", "tree"],
-        ["בית", "house"],
-        ["חתול", "cat"]
+      const bank = [
+        {
+          prompt: "Choose the correct word: She ___ to school every day.",
+          options: ["go", "goes", "going", "gone"],
+          answer: "goes"
+        },
+        {
+          prompt: "Complete the sentence: Yesterday we ___ to the park.",
+          options: ["go", "goes", "went", "going"],
+          answer: "went"
+        },
+        {
+          prompt: "Which word is the opposite of 'difficult'?",
+          options: ["hard", "easy", "slow", "long"],
+          answer: "easy"
+        },
+        {
+          prompt: "Pick the correct sentence:",
+          options: [
+            "He don't like math.",
+            "He doesn't likes math.",
+            "He doesn't like math.",
+            "He not like math."
+          ],
+          answer: "He doesn't like math."
+        },
+        {
+          prompt: "Choose the best translation: 'יש לי שני אחים'.",
+          options: [
+            "I have two brothers.",
+            "I has two brothers.",
+            "I have two brother.",
+            "I am have two brothers."
+          ],
+          answer: "I have two brothers."
+        }
       ];
-      const pair = words[randInt(0, words.length - 1)];
-      const distractors = shuffled(words.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
-      const options = shuffled([pair[1], ...distractors]);
-      return {
-        prompt: `מה התרגום של "${pair[0]}"?`,
-        options,
-        answer: pair[1]
-      };
+      return bank[randInt(0, bank.length - 1)];
     }
   },
   {
     id: "math",
-    icon: "➕",
+    icon: "🧮",
     title: "חשבון ומתמטיקה",
-    subtitle: "תרגילים מהירים",
+    subtitle: "כפל, חילוק וסדר פעולות (10+)",
     generate() {
-      const a = randInt(6, 25);
-      const b = randInt(3, 12);
-      const isPlus = Math.random() > 0.45;
-      const answer = isPlus ? a + b : a - b;
-      const prompt = isPlus ? `כמה זה ${a} + ${b} ?` : `כמה זה ${a} - ${b} ?`;
-      const options = shuffled([answer, answer + 1, answer - 1, answer + 3].filter((x, i, arr) => arr.indexOf(x) === i));
+      const mode = randInt(1, 3);
+      let answer = 0;
+      let prompt = "";
+      if (mode === 1) {
+        const a = randInt(11, 19);
+        const b = randInt(4, 9);
+        answer = a * b;
+        prompt = `כמה זה ${mathExpr(`${a} × ${b}`)} ?`;
+      } else if (mode === 2) {
+        const b = randInt(3, 9);
+        const answerBase = randInt(6, 18);
+        const a = b * answerBase;
+        answer = answerBase;
+        prompt = `כמה זה ${mathExpr(`${a} ÷ ${b}`)} ?`;
+      } else {
+        const a = randInt(4, 12);
+        const b = randInt(3, 10);
+        const c = randInt(2, 6);
+        answer = (a + b) * c;
+        prompt = `מה התוצאה של ${mathExpr(`(${a} + ${b}) × ${c}`)} ?`;
+      }
+      const options = shuffled([answer, answer + randInt(1, 4), Math.max(1, answer - randInt(1, 4)), answer + randInt(5, 9)]);
       return {
         prompt,
-        options: options.slice(0, 4),
+        options: options.filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 4),
         answer
       };
     }
@@ -123,21 +171,35 @@ const LEARN_MODULES_OLDER = [
     id: "geo",
     icon: "📐",
     title: "גאומטריה",
-    subtitle: "זיהוי צורות",
+    subtitle: "היקפים, שטחים וזוויות (10+)",
     generate() {
-      const shapes = [
-        ["🔺", "משולש"],
-        ["🟦", "ריבוע"],
-        ["⚪", "עיגול"],
-        ["🔶", "מעוין"]
-      ];
-      const pair = shapes[randInt(0, shapes.length - 1)];
-      const distractors = shuffled(shapes.filter((x) => x[1] !== pair[1]).map((x) => x[1])).slice(0, 3);
-      const options = shuffled([pair[1], ...distractors]);
+      const mode = randInt(1, 4);
+      let prompt = "";
+      let answer = 0;
+      if (mode === 1) {
+        const w = randInt(4, 11);
+        const h = randInt(3, 9);
+        prompt = `מה היקף מלבן באורך ${w} וברוחב ${h}?`;
+        answer = 2 * (w + h);
+      } else if (mode === 2) {
+        const w = randInt(4, 12);
+        const h = randInt(3, 10);
+        prompt = `מה שטח מלבן באורך ${w} וברוחב ${h}?`;
+        answer = w * h;
+      } else if (mode === 3) {
+        prompt = "כמה מעלות יש בזווית ישרה?";
+        answer = 90;
+      } else {
+        const sides = randInt(5, 8);
+        const names = { 5: "מחומש", 6: "משושה", 7: "משובע", 8: "מתומן" };
+        prompt = `כמה צלעות יש ל${names[sides]}?`;
+        answer = sides;
+      }
+      const options = shuffled([answer, answer + 2, Math.max(1, answer - 2), answer + 5]).filter((x, i, arr) => arr.indexOf(x) === i);
       return {
-        prompt: `איזו צורה רואים? ${pair[0]}`,
-        options,
-        answer: pair[1]
+        prompt,
+        options: options.slice(0, 4),
+        answer
       };
     }
   }
@@ -315,6 +377,7 @@ const seedRewards = [
 ];
 
 const APPROVAL_FREE_TASK_TITLES = new Set(["לקום", "לאכול", "תיק מוכן"]);
+const SOPHIA_HOMEWORK_TITLES = new Set(["שיעורי בית", "קריאה 15 דקות", "הכנת בגדים למחר"]);
 
 const defaultScoring = {
   child9: { routineBonusOnTime: 20, streakBonusPerDay: 2, streakCap: 12, lateThresholdMin: 20, latePenaltyMode: "partial", partialPenaltyPercent: 50 },
@@ -369,6 +432,50 @@ async function enforceTaskApprovalDefaults() {
   for (const task of tasks) {
     if (APPROVAL_FREE_TASK_TITLES.has(task.title) && (task.allowRandomApproval || task.requiresParentApproval)) {
       await put("tasks", { ...task, allowRandomApproval: false, requiresParentApproval: false });
+    }
+  }
+}
+
+async function ensureHomeworkSplitForSophia() {
+  const tasks = await getAll("tasks");
+  const sophiaTasks = tasks.filter((t) => t.profileId === "child9");
+
+  let homeworkOrder = 1;
+  for (const task of sophiaTasks) {
+    if (SOPHIA_HOMEWORK_TITLES.has(task.title) && task.routineType !== "homework") {
+      await put("tasks", { ...task, routineType: "homework", order: homeworkOrder });
+      homeworkOrder += 1;
+    } else if (SOPHIA_HOMEWORK_TITLES.has(task.title)) {
+      await put("tasks", { ...task, order: homeworkOrder });
+      homeworkOrder += 1;
+    }
+  }
+
+  const afterSchoolTemplates = [
+    { title: "חטיף בריא", icon: "🥗", basePoints: 6 },
+    { title: "מנוחה 15 דקות", icon: "🛋️", basePoints: 6 },
+    { title: "עזרה בבית 10 דקות", icon: "🧹", basePoints: 7 }
+  ];
+
+  const updatedTasks = await getAll("tasks");
+  const sophiaAfter = updatedTasks.filter((t) => t.profileId === "child9" && t.routineType === "afternoon");
+  let nextOrder = Math.max(0, ...sophiaAfter.map((t) => t.order || 0)) + 1;
+
+  for (const tpl of afterSchoolTemplates) {
+    const exists = updatedTasks.find((t) => t.profileId === "child9" && t.routineType === "afternoon" && t.title === tpl.title);
+    if (!exists) {
+      await add("tasks", {
+        profileId: "child9",
+        routineType: "afternoon",
+        title: tpl.title,
+        icon: tpl.icon,
+        basePoints: tpl.basePoints,
+        requiresParentApproval: false,
+        allowRandomApproval: false,
+        order: nextOrder,
+        active: true
+      });
+      nextOrder += 1;
     }
   }
 }
@@ -434,6 +541,15 @@ async function ensureInstances(profileId, date = dateKey) {
   const tasks = await getAll("tasks");
   const instances = await getInstancesForDate(profileId, date);
   const currentIds = new Set(instances.map((i) => i.taskId));
+  const taskMap = new Map(tasks.filter((t) => t.profileId === profileId).map((t) => [t.id, t]));
+
+  for (const inst of instances) {
+    const task = taskMap.get(inst.taskId);
+    if (!task) continue;
+    if (inst.routineType !== task.routineType) {
+      await put("taskInstances", { ...inst, routineType: task.routineType });
+    }
+  }
 
   for (const task of tasks.filter((t) => t.profileId === profileId && t.active)) {
     if (!currentIds.has(task.id)) {
@@ -1053,12 +1169,12 @@ async function renderHome() {
         </div>
         <div class="card">
           <p class="muted">נקודות היום</p>
-          <p class="points">${summary.daily}/${summary.dailyCap}</p>
-          <p class="muted">שבועי: ${summary.weekly}/${summary.weeklyCap}</p>
-          <p class="muted">חודשי: ${summary.monthly}/${summary.monthlyCap}</p>
-          <p class="muted">לימודים היום: ${learnSummary.daily}/${learnSummary.dailyCap}</p>
-          <p class="muted">יתרה בחנות תגמולים: ${wallet.balance}</p>
-          <p class="muted">היום הושלמו ${done} מתוך ${instances.length}</p>
+          <p class="points">${ratioLtr(summary.daily, summary.dailyCap)}</p>
+          <p class="muted">שבועי: ${ratioLtr(summary.weekly, summary.weeklyCap)}</p>
+          <p class="muted">חודשי: ${ratioLtr(summary.monthly, summary.monthlyCap)}</p>
+          <p class="muted">לימודים היום: ${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
+          <p class="muted">יתרה בחנות תגמולים: ${numLtr(wallet.balance)}</p>
+          <p class="muted">היום הושלמו ${numLtr(done)} מתוך ${numLtr(instances.length)}</p>
         </div>
       </div>
 
@@ -1120,13 +1236,15 @@ async function renderRoutine() {
 
   const target = state.routine === "morning" ? profile.morningTarget : state.routine === "evening" ? profile.bedtimeTarget : "17:00";
   const leftMin = minutesBetween(nowHM(), target);
+  const routineSubtitle = state.routine === "afternoon" ? "משימות אחריות וזמן בית" : "";
 
   app.innerHTML = `
     <section class="screen">
       <div class="card row">
         <div>
           <h1>${routineLabel(state.routine)}</h1>
-          <p class="muted">יעד זמן: ${target} ${leftMin >= 0 ? `(נשארו ${leftMin} דק')` : `(איחור ${Math.abs(leftMin)} דק')`}</p>
+          <p class="muted">יעד זמן: ${numLtr(target)} ${leftMin >= 0 ? `(נשארו ${numLtr(leftMin)} דק')` : `(איחור ${numLtr(Math.abs(leftMin))} דק')`}</p>
+          ${routineSubtitle ? `<p class="muted">${routineSubtitle}</p>` : ""}
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
       </div>
@@ -1144,7 +1262,7 @@ async function renderRoutine() {
                 <div>
                   <h3>${task.icon} ${task.title}</h3>
                   <div class="task-meta">
-                    <span>${displayPointsByTaskId[task.id] || 0} נק'</span>
+                    <span>${numLtr(displayPointsByTaskId[task.id] || 0)} נק'</span>
                     ${task.requiresParentApproval ? "<span>• אישור הורה</span>" : ""}
                     ${inst ? statusTag(inst.status) : ""}
                   </div>
@@ -1203,8 +1321,7 @@ async function renderHomework() {
     return render();
   }
 
-  state.routine = "afternoon";
-  const tasks = (await getTasksForRoutine(state.profileId, "afternoon")).filter((t) => t.title.includes("שיעורי") || t.title.includes("קריאה") || t.title.includes("בגדים"));
+  const tasks = await getTasksForRoutine(state.profileId, "homework");
   const instances = await getInstancesForDate(state.profileId, dateKey);
   const displayPointsByTaskId = await getTaskDisplayMap(tasks);
 
@@ -1213,7 +1330,7 @@ async function renderHomework() {
       <div class="card row">
         <div>
           <h1>שיעורי בית</h1>
-          <p class="muted">צילום הוא אופציונלי בשלב זה (אפשר להרחיב בהמשך)</p>
+          <p class="muted">אנגלית, מתמטיקה וגאומטריה</p>
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
       </div>
@@ -1228,9 +1345,9 @@ async function renderHomework() {
         return `
             <article class="task-item ${isDone ? "done" : isPending ? "pending" : ""}">
               <div>
-                <h3>${task.icon} ${task.title}</h3>
-                <div class="task-meta">
-                  <span>${displayPointsByTaskId[task.id] || 0} נק'</span>
+                  <h3>${task.icon} ${task.title}</h3>
+                  <div class="task-meta">
+                  <span>${numLtr(displayPointsByTaskId[task.id] || 0)} נק'</span>
                   ${statusTag(inst?.status || "pending")}
                 </div>
               </div>
@@ -1310,9 +1427,9 @@ async function renderLearnPlay() {
 
       <div class="card">
         <h3>ניקוד לימודים</h3>
-        <p class="points">${learnSummary.daily}/${learnSummary.dailyCap}</p>
-        <p class="muted">שבועי לימודים: ${learnSummary.weekly}/${learnSummary.weeklyCap}</p>
-        <p class="muted">חודשי לימודים: ${learnSummary.monthly}/${learnSummary.monthlyCap}</p>
+        <p class="points">${ratioLtr(learnSummary.daily, learnSummary.dailyCap)}</p>
+        <p class="muted">שבועי לימודים: ${ratioLtr(learnSummary.weekly, learnSummary.weeklyCap)}</p>
+        <p class="muted">חודשי לימודים: ${ratioLtr(learnSummary.monthly, learnSummary.monthlyCap)}</p>
       </div>
 
       <div class="learn-grid">
@@ -1324,14 +1441,17 @@ async function renderLearnPlay() {
             <article class="card learn-card">
               <div class="row">
                 <h3>${module.icon} ${module.title}</h3>
-                <span class="tag ok">${stats.correct}/${stats.total} נכון</span>
+                <span class="tag ok">${ratioLtr(stats.correct, stats.total)} נכון</span>
               </div>
               <p class="muted">${module.subtitle}</p>
               <p class="learn-question">${q.prompt}</p>
               <div class="learn-options">
                 ${q.options
               .map(
-                (opt) => `<button class="big-btn secondary learn-option-btn" data-learn-answer="${module.id}" data-value="${String(opt)}">${opt}</button>`
+                (opt) =>
+                  `<button class="big-btn secondary learn-option-btn" data-learn-answer="${module.id}" data-value="${String(opt)}">${
+                    typeof opt === "number" ? numLtr(opt) : opt
+                  }</button>`
               )
               .join("")}
               </div>
@@ -1397,7 +1517,7 @@ async function renderRewards() {
         <div>
           <h1>חנות תגמולים</h1>
           <p class="muted">יתרה נוכחית</p>
-          <p class="points">${wallet.balance}</p>
+          <p class="points">${numLtr(wallet.balance)}</p>
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
       </div>
@@ -1409,7 +1529,7 @@ async function renderRewards() {
               <article class="task-item">
                 <div>
                   <h3>${r.title}</h3>
-                  <div class="task-meta"><span>${r.cost} נק'</span> ${r.requiresApproval ? "<span>• דורש אישור הורה</span>" : ""}</div>
+                  <div class="task-meta"><span>${numLtr(r.cost)} נק'</span> ${r.requiresApproval ? "<span>• דורש אישור הורה</span>" : ""}</div>
                 </div>
                 <button class="big-btn" data-redeem="${r.id}" ${wallet.balance < r.cost ? "disabled" : ""}>מימוש</button>
               </article>
@@ -1792,6 +1912,7 @@ async function bootstrap() {
   await ensureGlobalSettings();
   await enforceProfileNames();
   await enforceTaskApprovalDefaults();
+  await ensureHomeworkSplitForSophia();
   const profiles = await getAll("profiles");
   for (const profile of profiles) {
     await ensureInstances(profile.id, dateKey);
@@ -1800,7 +1921,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=13");
+    navigator.serviceWorker.register("sw.js?v=15");
   }
 }
 
