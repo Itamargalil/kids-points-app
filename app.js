@@ -48,6 +48,12 @@ const MORNING_BONUS_POINTS = 10;
 const STREAK_BONUS_MAX = 10;
 const LEARN_POINTS_PER_CORRECT = 2;
 const LEARN_DAILY_CAP = 30;
+const COMPLETION_WINDOWS = {
+  morning: { start: "06:00", end: "08:00" },
+  afternoon: { start: "13:00", end: "20:00" },
+  evening: { start: "13:00", end: "20:00" },
+  homework: { start: "13:00", end: "20:00" }
+};
 
 const stores = [
   "profiles",
@@ -542,6 +548,22 @@ function minutesBetween(hmA, hmB) {
   return (h2 * 60 + m2) - (h1 * 60 + m1);
 }
 
+function hmToMinutes(hm) {
+  const [h, m] = hm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function getCompletionWindow(routineType) {
+  return COMPLETION_WINDOWS[routineType] || null;
+}
+
+function isWithinCompletionWindow(routineType, hm = nowHM()) {
+  const window = getCompletionWindow(routineType);
+  if (!window) return true;
+  const current = hmToMinutes(hm);
+  return current >= hmToMinutes(window.start) && current <= hmToMinutes(window.end);
+}
+
 function isoFromDate(dateObj) {
   const d = new Date(dateObj);
   const tz = d.getTimezoneOffset() * 60000;
@@ -620,6 +642,7 @@ async function ensureInstances(profileId, date = dateKey) {
         completedAt: null,
         pointsAwarded: 0,
         approvalBy: null,
+        pendingReason: null,
         routineType: task.routineType
       });
     }
@@ -799,17 +822,37 @@ async function shouldRequireApproval(task) {
 
 async function applyTaskCompletion(instanceId) {
   const instance = await getById("taskInstances", instanceId);
+  if (!instance) return;
   const task = await getById("tasks", instance.taskId);
   if (!task || instance.status === "approved") return;
 
-  const requireApproval = await shouldRequireApproval(task);
   const completionTime = formatHM(new Date());
+  const outsideWindow = !isWithinCompletionWindow(task.routineType, completionTime);
+
+  if (outsideWindow) {
+    if (state.parentAuthorized) {
+      await put("taskInstances", { ...instance, completedAt: completionTime, pendingReason: null });
+      await approveTask(instance.id, true, "parent_time_window");
+      return;
+    }
+    await put("taskInstances", {
+      ...instance,
+      completedAt: completionTime,
+      status: "pending_approval",
+      pendingReason: "time_window"
+    });
+    toast("מחוץ לשעות הסימון - נדרש אישור הורה");
+    return;
+  }
+
+  const requireApproval = await shouldRequireApproval(task);
 
   if (requireApproval) {
     await put("taskInstances", {
       ...instance,
       completedAt: completionTime,
-      status: "pending_approval"
+      status: "pending_approval",
+      pendingReason: null
     });
     toast("המשימה נשלחה לאישור הורה");
     return;
@@ -989,7 +1032,7 @@ async function approveTask(instanceId, approved, approver = "parent") {
   if (!instance || !task) return;
 
   if (!approved) {
-    await put("taskInstances", { ...instance, status: "rejected", pointsAwarded: 0, approvalBy: approver });
+    await put("taskInstances", { ...instance, status: "rejected", pointsAwarded: 0, approvalBy: approver, pendingReason: null });
     await clearMilestoneMarkers(instance.profileId, instance.date);
     await recomputeDailyScores(instance.profileId, instance.date);
     toast("המשימה נדחתה");
@@ -1003,7 +1046,8 @@ async function approveTask(instanceId, approved, approver = "parent") {
     completedAt: completionHM,
     status: "approved",
     pointsAwarded: 0,
-    approvalBy: approver
+    approvalBy: approver,
+    pendingReason: null
   });
   await recomputeDailyScores(instance.profileId, instance.date);
   await maybeCelebrateMilestones(instance.profileId, instance.date, task.routineType);
@@ -1020,7 +1064,8 @@ async function resetTaskInstance(instanceId) {
     status: "pending",
     completedAt: null,
     pointsAwarded: 0,
-    approvalBy: null
+    approvalBy: null,
+    pendingReason: null
   });
 
   await clearMilestoneMarkers(instance.profileId, instance.date);
@@ -1081,8 +1126,9 @@ function routineLabel(r) {
   return { morning: "בוקר", afternoon: "אחרי מסגרת", evening: "ערב", homework: "שיעורי בית" }[r] || r;
 }
 
-function statusTag(status) {
+function statusTag(status, reason = null) {
   if (status === "approved") return `<span class="tag ok">בוצע</span>`;
+  if (status === "pending_approval" && reason === "time_window") return `<span class="tag warn">ממתין אישור (מחוץ לשעות)</span>`;
   if (status === "pending_approval") return `<span class="tag warn">ממתין אישור</span>`;
   if (status === "rejected") return `<span class="tag bad">נדחה</span>`;
   return `<span class="tag warn">ממתין</span>`;
@@ -1283,7 +1329,7 @@ async function renderHome() {
         <div class="list">
           ${remaining
       .slice(0, 5)
-      .map((r) => `<div class="row"><span>${routineLabel(r.routineType)}</span>${statusTag(r.status)}</div>`)
+      .map((r) => `<div class="row"><span>${routineLabel(r.routineType)}</span>${statusTag(r.status, r.pendingReason)}</div>`)
       .join("") || '<p class="muted">כל הכבוד, הכל הושלם</p>'}
         </div>
       </div>
@@ -1333,10 +1379,14 @@ async function renderRoutine() {
   const tasks = await getTasksForRoutine(state.profileId, state.routine);
   const instances = await getInstancesForDate(state.profileId, dateKey);
   const displayPointsByTaskId = await getTaskDisplayMap(tasks);
+  const currentHM = nowHM();
 
   const target = state.routine === "morning" ? profile.morningTarget : state.routine === "evening" ? profile.bedtimeTarget : "17:00";
-  const leftMin = minutesBetween(nowHM(), target);
+  const leftMin = minutesBetween(currentHM, target);
   const routineSubtitle = state.routine === "afternoon" ? "משימות אחריות וזמן בית" : "";
+  const completionWindow = getCompletionWindow(state.routine);
+  const completionWindowText = completionWindow ? `${completionWindow.start}-${completionWindow.end}` : "ללא הגבלה";
+  const completionOpenNow = isWithinCompletionWindow(state.routine, currentHM);
 
   app.innerHTML = `
     <section class="screen">
@@ -1344,6 +1394,7 @@ async function renderRoutine() {
         <div>
           <h1>${routineLabel(state.routine)}</h1>
           <p class="muted">יעד זמן: ${numLtr(target)} ${leftMin >= 0 ? `(נשארו ${numLtr(leftMin)} דק')` : `(איחור ${numLtr(Math.abs(leftMin))} דק')`}</p>
+          <p class="muted">חלון סימון: ${numLtr(completionWindowText)} ${completionOpenNow ? "🟢 פתוח" : "🔒 סגור (אישור הורה)"}</p>
           ${routineSubtitle ? `<p class="muted">${routineSubtitle}</p>` : ""}
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
@@ -1355,8 +1406,11 @@ async function renderRoutine() {
         const inst = instances.find((i) => i.taskId === task.id);
         const done = inst?.status === "approved";
         const pending = inst?.status === "pending_approval";
+        const outsideWindow = !isWithinCompletionWindow(task.routineType, currentHM);
         const doneBtnClass = state.parentAuthorized ? "warn" : "ghost";
         const doneBtnLabel = state.parentAuthorized ? "בטל" : "בטל (הורה)";
+        const completeBtnClass = outsideWindow && !state.parentAuthorized ? "warn" : "secondary";
+        const completeBtnLabel = outsideWindow && !state.parentAuthorized ? "סימון (אישור הורה)" : "סימון";
         return `
               <article class="task-item ${done ? "done" : pending ? "pending" : ""}">
                 <div>
@@ -1364,7 +1418,8 @@ async function renderRoutine() {
                   <div class="task-meta">
                     <span>${numLtr(displayPointsByTaskId[task.id] || 0)} נק'</span>
                     ${task.requiresParentApproval ? "<span>• אישור הורה</span>" : ""}
-                    ${inst ? statusTag(inst.status) : ""}
+                    ${outsideWindow ? "<span>• מחוץ לשעות</span>" : ""}
+                    ${inst ? statusTag(inst.status, inst.pendingReason) : ""}
                   </div>
                 </div>
                 ${
@@ -1372,7 +1427,7 @@ async function renderRoutine() {
                     ? `<button class="big-btn ${doneBtnClass}" data-uncomplete="${inst.id}">${doneBtnLabel}</button>`
                     : pending
                       ? `<button class="big-btn ghost" disabled>ממתין</button>`
-                      : `<button class="big-btn secondary" data-complete="${inst.id}">סימון</button>`
+                      : `<button class="big-btn ${completeBtnClass}" data-complete="${inst.id}">${completeBtnLabel}</button>`
                 }
               </article>
             `;
@@ -1424,6 +1479,10 @@ async function renderHomework() {
   const tasks = await getTasksForRoutine(state.profileId, "homework");
   const instances = await getInstancesForDate(state.profileId, dateKey);
   const displayPointsByTaskId = await getTaskDisplayMap(tasks);
+  const currentHM = nowHM();
+  const completionWindow = getCompletionWindow("homework");
+  const completionWindowText = completionWindow ? `${completionWindow.start}-${completionWindow.end}` : "ללא הגבלה";
+  const completionOpenNow = isWithinCompletionWindow("homework", currentHM);
 
   app.innerHTML = `
     <section class="screen">
@@ -1431,6 +1490,7 @@ async function renderHomework() {
         <div>
           <h1>שיעורי בית</h1>
           <p class="muted">אנגלית, מתמטיקה וגאומטריה</p>
+          <p class="muted">חלון סימון: ${numLtr(completionWindowText)} ${completionOpenNow ? "🟢 פתוח" : "🔒 סגור (אישור הורה)"}</p>
         </div>
         <button class="big-btn ghost" id="toHome">היום שלי</button>
       </div>
@@ -1440,15 +1500,19 @@ async function renderHomework() {
         const inst = instances.find((i) => i.taskId === task.id);
         const isDone = inst?.status === "approved";
         const isPending = inst?.status === "pending_approval";
+        const outsideWindow = !isWithinCompletionWindow(task.routineType || "homework", currentHM);
         const doneBtnClass = state.parentAuthorized ? "warn" : "ghost";
         const doneBtnLabel = state.parentAuthorized ? "בטל" : "בטל (הורה)";
+        const completeBtnClass = outsideWindow && !state.parentAuthorized ? "warn" : "secondary";
+        const completeBtnLabel = outsideWindow && !state.parentAuthorized ? "סימון (אישור הורה)" : "סימון";
         return `
             <article class="task-item ${isDone ? "done" : isPending ? "pending" : ""}">
               <div>
                   <h3>${task.icon} ${task.title}</h3>
                   <div class="task-meta">
                   <span>${numLtr(displayPointsByTaskId[task.id] || 0)} נק'</span>
-                  ${statusTag(inst?.status || "pending")}
+                  ${outsideWindow ? "<span>• מחוץ לשעות</span>" : ""}
+                  ${statusTag(inst?.status || "pending", inst?.pendingReason || null)}
                 </div>
               </div>
               ${
@@ -1456,7 +1520,7 @@ async function renderHomework() {
                   ? `<button class="big-btn ${doneBtnClass}" data-uncomplete="${inst.id}">${doneBtnLabel}</button>`
                   : isPending
                     ? `<button class="big-btn ghost" disabled>ממתין</button>`
-                    : `<button class="big-btn secondary" data-complete="${inst.id}">סימון</button>`
+                    : `<button class="big-btn ${completeBtnClass}" data-complete="${inst.id}">${completeBtnLabel}</button>`
               }
             </article>
           `;
@@ -2030,7 +2094,7 @@ async function bootstrap() {
   await render();
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js?v=18");
+    navigator.serviceWorker.register("sw.js?v=19");
   }
 }
 
